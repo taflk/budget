@@ -5,6 +5,28 @@
   background-color: #f3f1ed;
 }
 
+@supports (-webkit-touch-callout: none) {
+  :root {
+    font-size: 106%;
+  }
+
+  .button {
+    padding: 14px 18px;
+    font-size: 16px;
+  }
+
+  .button--small {
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  .field input,
+  .field select {
+    padding: 16px 18px;
+    font-size: 16px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
