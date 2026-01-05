@@ -1,0 +1,1 @@
+{"name":"Budget","short_name":"Budget","description":"Budget planning and bills","start_url":"/","display":"standalone","background_color":"#f3f1ed","theme_color":"#f3f1ed","lang":"en","scope":"/budget/","icons":[{"src":"/pwa-icon.svg","sizes":"any","type":"image/svg+xml"},{"src":"/pwa-maskable.svg","sizes":"any","type":"image/svg+xml","purpose":"maskable"}]}
