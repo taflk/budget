@@ -869,6 +869,11 @@ h1 {
 }
 
 .calendar__header {
+  display: grid;
+  gap: 8px;
+}
+
+.calendar__title-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -954,6 +959,8 @@ h1 {
 .calendar-actions {
   display: flex;
   gap: 10px;
+  padding: 10px 0;
+  justify-content: flex-end;
 }
 
 .footnote {

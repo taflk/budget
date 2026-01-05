@@ -5,24 +5,6 @@
     subtitle="See when bills should be paid."
   >
     <template #actions>
-      <div class="calendar-actions">
-        <BaseButton
-          variant="ghost"
-          type="button"
-          class="button--small"
-          @click="goPrevious"
-        >
-          Previous
-        </BaseButton>
-        <BaseButton
-          variant="ghost"
-          type="button"
-          class="button--small"
-          @click="goNext"
-        >
-          Next
-        </BaseButton>
-      </div>
       <div v-if="categories.length" class="category-legend">
         <span
           v-for="category in categories"
@@ -40,8 +22,28 @@
 
     <div class="calendar">
       <div class="calendar__header">
-        <p class="calendar__title">{{ monthLabel }}</p>
-        <p class="calendar__subtitle">{{ year }}</p>
+        <div class="calendar__title-row">
+          <p class="calendar__title">{{ monthLabel }}</p>
+          <p class="calendar__subtitle">{{ year }}</p>
+        </div>
+        <div class="calendar-actions">
+          <BaseButton
+            variant="ghost"
+            type="button"
+            class="button--small"
+            @click="goPrevious"
+          >
+            Previous
+          </BaseButton>
+          <BaseButton
+            variant="ghost"
+            type="button"
+            class="button--small"
+            @click="goNext"
+          >
+            Next
+          </BaseButton>
+        </div>
       </div>
 
       <div class="calendar__grid calendar__grid--weekdays">
