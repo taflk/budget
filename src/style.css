@@ -1292,6 +1292,24 @@ h1 {
     width: 100%;
   }
 
+  .chart__row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: start;
+  }
+
+  .chart__bar {
+    width: 100%;
+  }
+
+  .chart__value {
+    text-align: left;
+  }
+
+  .chart-toggle {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 
 @media (max-width: 640px) {
