@@ -1,30 +1,40 @@
 <template>
   <DashboardLayout
     eyebrow="Budget"
-    title="Budget"
+    :title="`Budget - ${selectedYear}`"
     subtitle="Plan your yearly budget."
   >
     <template #actions>
       <div class="month-tabs">
-        <span class="month-tabs__label">Month</span>
-        <div class="month-tabs__buttons">
-          <button
-            v-for="month in visibleMonths"
-            :key="month"
-            type="button"
-            class="month-tab"
-            :class="{ 'month-tab--active': selectedMonth === month }"
-            @click="selectedMonth = month"
-          >
-            {{ month }}
-          </button>
-          <button
-            type="button"
-            class="month-tab month-tab--more"
-            @click="showAllMonths = !showAllMonths"
-          >
-            {{ showAllMonths ? "Less" : "More" }}
-          </button>
+        <div class="month-tabs__row">
+          <span class="month-tabs__label">Year</span>
+          <select v-model.number="selectedYear" class="month-tabs__select">
+            <option v-for="year in years" :key="year" :value="year">
+              {{ year }}
+            </option>
+          </select>
+        </div>
+        <div class="month-tabs__row">
+          <span class="month-tabs__label">Month</span>
+          <div class="month-tabs__buttons">
+            <button
+              v-for="month in visibleMonths"
+              :key="month"
+              type="button"
+              class="month-tab"
+              :class="{ 'month-tab--active': selectedMonth === month }"
+              @click="selectedMonth = month"
+            >
+              {{ month }}
+            </button>
+            <button
+              type="button"
+              class="month-tab month-tab--more"
+              @click="showAllMonths = !showAllMonths"
+            >
+              {{ showAllMonths ? "Less" : "More" }}
+            </button>
+          </div>
         </div>
       </div>
       <div class="action-row action-row--spread action-row--ruled">
@@ -49,6 +59,14 @@
             variant="ghost"
             type="button"
             class="button--small"
+            @click="openTemplateModal"
+          >
+            Templates
+          </BaseButton>
+          <BaseButton
+            variant="ghost"
+            type="button"
+            class="button--small"
             @click="openClearMonth"
           >
             Clear month
@@ -61,22 +79,39 @@
         </div>
       </div>
       <div v-if="categories.length" class="category-legend">
-        <span
+        <button
           v-for="category in categories"
           :key="category.$id"
-          class="category-pill"
+          type="button"
+          class="category-pill category-pill--button"
+          :class="{ 'category-pill--active': isCategorySelected(category.$id) }"
+          @click="toggleCategoryFilter(category.$id)"
         >
           <span
             class="category-dot"
             :style="{ background: category.color }"
           />
           {{ category.name }}
-        </span>
+        </button>
+        <button
+          v-if="selectedCategoryFilters.length"
+          type="button"
+          class="category-pill category-pill--clear"
+          @click="clearCategoryFilters"
+        >
+          Clear
+        </button>
       </div>
+      <p
+        v-if="selectedCategoryFilters.length"
+        class="category-legend-total"
+      >
+        Filter total: {{ formatCurrency(filteredTotal) }}
+      </p>
     </template>
     <p v-if="errorMessage" class="form__error">{{ errorMessage }}</p>
     <p v-if="isLoading" class="loading-text">Loading...</p>
-    <div v-if="entries.length === 0" class="empty-state">
+    <div v-if="filteredEntries.length === 0" class="empty-state">
       <p>No entries for {{ selectedMonth }}.</p>
     </div>
     <div v-else class="entry-list">
@@ -90,7 +125,7 @@
           <p class="entry-title">{{ entry.name }}</p>
           <p class="entry-meta">
             {{ entry.type === "income" ? "Income" : "Expense" }} ·
-            {{ entry.month }}
+            {{ entry.month }} {{ entry.year || selectedYear }}
             <span v-if="entry.categoryId">
               ·
               {{ categoryNameById[entry.categoryId] || "Uncategorized" }}
@@ -150,75 +185,89 @@
     </div>
 
     <div v-if="isModalOpen" class="modal-backdrop" @click.self="closeModal">
-      <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal entry-modal" role="dialog" aria-modal="true">
         <header class="modal__header">
           <h2>{{ isEditing ? "Edit entry" : "New entry" }}</h2>
           <button class="modal__close" type="button" @click="closeModal">
             Close
           </button>
         </header>
-        <div class="modal__body">
-          <div class="modal__toggle">
-            <button
-              type="button"
-              class="toggle-button"
-              :class="{ 'toggle-button--active': entryType === 'income' }"
-              @click="entryType = 'income'"
-            >
-              Income
-            </button>
-            <button
-              type="button"
-              class="toggle-button"
-              :class="{ 'toggle-button--active': entryType === 'expense' }"
-              @click="entryType = 'expense'"
-            >
-              Expense
-            </button>
-          </div>
-          <div class="modal__form">
-            <label class="field">
-              <span>Name</span>
-              <input
-                v-model="entryName"
-                type="text"
-                placeholder="Salary, Rent, Groceries"
-              />
-            </label>
-            <label class="field">
-              <span>Amount</span>
-              <input
-                v-model="amount"
-                type="number"
-                inputmode="decimal"
-                placeholder="0"
-              />
-            </label>
-            <label v-if="entryType === 'expense'" class="field">
-              <span>Due day (1-31)</span>
-              <input
-                v-model.number="dueDay"
-                type="number"
-                min="1"
-                max="31"
-                step="1"
-                placeholder="1"
-              />
-            </label>
-            <label v-if="entryType === 'expense'" class="field">
-              <span>Category</span>
-              <select v-model="selectedCategoryId">
-                <option value="">Uncategorized</option>
-                <option
-                  v-for="category in categories"
-                  :key="category.$id"
-                  :value="category.$id"
+        <div class="modal__body entry-modal__body">
+          <div class="entry-scroll">
+            <div ref="entryScrollBody" class="entry-scroll__body">
+              <div class="modal__toggle">
+                <button
+                  type="button"
+                  class="toggle-button"
+                  :class="{ 'toggle-button--active': entryType === 'income' }"
+                  @click="entryType = 'income'"
                 >
-                  {{ category.name }}
-                </option>
-              </select>
-            </label>
-            <BaseButton variant="primary" type="button" @click="onSaveEntry">
+                  Income
+                </button>
+                <button
+                  type="button"
+                  class="toggle-button"
+                  :class="{ 'toggle-button--active': entryType === 'expense' }"
+                  @click="entryType = 'expense'"
+                >
+                  Expense
+                </button>
+              </div>
+              <div class="modal__form">
+                <label class="field">
+                  <span>Name</span>
+                  <input
+                    v-model="entryName"
+                    type="text"
+                    placeholder="Salary, Rent, Groceries"
+                  />
+                </label>
+                <label class="field">
+                  <span>Amount</span>
+                  <input
+                    v-model="amount"
+                    type="number"
+                    inputmode="decimal"
+                    placeholder="0"
+                  />
+                </label>
+                <label v-if="entryType === 'expense'" class="field">
+                  <span>Due day (1-31)</span>
+                  <input
+                    v-model.number="dueDay"
+                    type="number"
+                    min="1"
+                    max="31"
+                    step="1"
+                    placeholder="1"
+                  />
+                </label>
+                <label v-if="entryType === 'expense'" class="field">
+                  <span>Category</span>
+                  <select v-model="selectedCategoryId">
+                    <option value="">Uncategorized</option>
+                    <option
+                      v-for="category in categories"
+                      :key="category.$id"
+                      :value="category.$id"
+                    >
+                      {{ category.name }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div v-if="showScrollHint" class="entry-scroll__hint">
+              Scroll for more
+            </div>
+          </div>
+          <div class="entry-modal__footer">
+            <BaseButton
+              variant="primary"
+              type="button"
+              class="entry-modal__submit"
+              @click="onSaveEntry"
+            >
               {{ isEditing ? "Save" : "Add" }}
             </BaseButton>
           </div>
@@ -312,11 +361,115 @@
         </div>
       </div>
     </div>
+    <div
+      v-if="isTemplateOpen"
+      class="modal-backdrop"
+      @click.self="closeTemplateModal"
+    >
+      <div class="modal" role="dialog" aria-modal="true">
+        <header class="modal__header">
+          <h2>Templates</h2>
+          <button class="modal__close" type="button" @click="closeTemplateModal">
+            Close
+          </button>
+        </header>
+        <div class="modal__body">
+          <label class="field">
+            <span>Template name</span>
+            <input
+              v-model="templateName"
+              type="text"
+              placeholder="Standard month"
+            />
+          </label>
+          <p v-if="templateError" class="form__error">{{ templateError }}</p>
+          <p v-if="templateSuccess" class="settings-hint">{{ templateSuccess }}</p>
+          <div class="action-row">
+            <BaseButton
+              variant="primary"
+              type="button"
+              class="template-save-button"
+              @click="onSaveTemplate"
+            >
+              Save current month
+            </BaseButton>
+          </div>
+          <p class="modal__hint">
+            Applying a template adds entries to the selected month.
+          </p>
+          <div v-if="templates.length" class="template-list">
+            <div
+              v-for="template in templates"
+              :key="template.$id"
+              class="template-row"
+            >
+              <div class="template-meta">
+                <p class="template-name">{{ template.name }}</p>
+                <p class="template-count">
+                  {{ templateCount(template) }} entries
+                </p>
+              </div>
+              <div class="entry-buttons">
+                <button
+                  type="button"
+                  class="entry-button entry-button--secondary"
+                  @click="openTemplateConfirm('apply', template)"
+                >
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  class="entry-button entry-button--secondary entry-button--danger"
+                  @click="openTemplateConfirm('delete', template)"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+          <p v-else class="settings-hint">No templates yet.</p>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="isTemplateConfirmOpen"
+      class="modal-backdrop"
+      @click.self="closeTemplateConfirm"
+    >
+      <div class="modal modal--compact" role="dialog" aria-modal="true">
+        <header class="modal__header">
+          <h2>{{ templateConfirmTitle }}</h2>
+          <button class="modal__close" type="button" @click="closeTemplateConfirm">
+            Close
+          </button>
+        </header>
+        <div class="modal__body">
+          <p>{{ templateConfirmText }}</p>
+          <div class="action-row">
+            <BaseButton
+              variant="ghost"
+              type="button"
+              @click="closeTemplateConfirm"
+            >
+              No
+            </BaseButton>
+            <BaseButton
+              variant="primary"
+              type="button"
+              :disabled="isTemplateActioning"
+              @click="confirmTemplateAction"
+            >
+              {{ templateConfirmActionLabel }}
+            </BaseButton>
+          </div>
+        </div>
+      </div>
+    </div>
   </DashboardLayout>
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import BaseButton from "../components/BaseButton.vue";
 import DashboardLayout from "../components/DashboardLayout.vue";
 import { formatCurrency, loadPreferences } from "../services/currency.js";
@@ -326,6 +479,9 @@ import {
   deleteEntry,
   getCurrentUser,
   listEntries,
+  createTemplate,
+  deleteTemplate,
+  listTemplates,
   updateEntry,
 } from "../services/appwrite.js";
 
@@ -340,10 +496,23 @@ const deleteTargetId = ref(null);
 const isCopyOpen = ref(false);
 const copySourceMonth = ref("");
 const isClearOpen = ref(false);
+const isTemplateOpen = ref(false);
+const templates = ref([]);
+const templateName = ref("");
+const templateError = ref("");
+const templateSuccess = ref("");
+const isTemplateConfirmOpen = ref(false);
+const templateAction = ref("");
+const selectedTemplate = ref(null);
+const isTemplateActioning = ref(false);
 const userId = ref(null);
 const isLoading = ref(false);
 const errorMessage = ref("");
+const entryScrollBody = ref(null);
+const showScrollHint = ref(false);
+let entryScrollObserver = null;
 const categories = ref([]);
+const selectedCategoryFilters = ref([]);
 const selectedCategoryId = ref("");
 const incomeCategoryId = computed(() => {
   const found = categories.value.find(
@@ -371,12 +540,28 @@ const months = [
   "November",
   "December",
 ];
+const currentYear = new Date().getFullYear();
 const selectedMonth = ref(months[new Date().getMonth()]);
+const selectedYear = ref(currentYear);
 const showAllMonths = ref(false);
+const hasMigratedYears = ref(false);
+const isMigratingYears = ref(false);
+const years = computed(() => {
+  const start = currentYear - 3;
+  const end = currentYear + 3;
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+});
 
 const closeModal = () => {
   isModalOpen.value = false;
   resetForm();
+};
+
+const updateScrollHint = () => {
+  if (!entryScrollBody.value) return;
+  showScrollHint.value =
+    entryScrollBody.value.scrollHeight >
+    entryScrollBody.value.clientHeight + 1;
 };
 
 const entries = ref([]);
@@ -412,6 +597,7 @@ const onSaveEntry = async () => {
     amount: numericAmount,
     name: trimmedName,
     month: selectedMonth.value,
+    year: selectedYear.value,
     userId: userId.value,
     dueDay:
       entryType.value === "expense" && Number.isFinite(dueDay.value)
@@ -482,10 +668,58 @@ const visibleMonths = computed(() => {
   return upcoming;
 });
 
+const matchesSelectedYear = (entry) =>
+  (entry.year ?? currentYear) === selectedYear.value;
+
+const migrateMissingYears = async () => {
+  if (hasMigratedYears.value || isMigratingYears.value) return;
+  isMigratingYears.value = true;
+  try {
+    const user = await getCurrentUser();
+    userId.value = user?.$id ?? null;
+    if (!userId.value) return;
+    const categoryResult = await listCategories(userId.value);
+    categories.value = categoryResult.documents;
+    const uncategorized = categories.value.find(
+      (category) => category.name.toLowerCase() === "uncategorized"
+    );
+    const income = categories.value.find(
+      (category) => category.name.toLowerCase() === "income"
+    );
+    const uncategorizedIdLocal = uncategorized?.$id ?? "";
+    const incomeIdLocal = income?.$id ?? "";
+    const updates = [];
+    for (const month of months) {
+      const result = await listEntries(month, userId.value);
+      for (const entry of result.documents) {
+        if (entry.year) continue;
+        const createdAt = entry.$createdAt || entry.createdAt;
+        const year = createdAt ? new Date(createdAt).getFullYear() : null;
+        if (!Number.isFinite(year)) continue;
+        const fallbackCategoryId =
+          entry.type === "income" ? incomeIdLocal || uncategorizedIdLocal : uncategorizedIdLocal || incomeIdLocal;
+        const categoryId = entry.categoryId || fallbackCategoryId;
+        if (!categoryId) continue;
+        updates.push(updateEntry(entry.$id, { year, categoryId }));
+      }
+    }
+    if (updates.length) {
+      await Promise.all(updates);
+    }
+    hasMigratedYears.value = true;
+  } catch (error) {
+    errorMessage.value =
+      error?.message || "Could not migrate entries to include year.";
+  } finally {
+    isMigratingYears.value = false;
+  }
+};
+
 const loadEntries = async () => {
   errorMessage.value = "";
   isLoading.value = true;
   try {
+    await migrateMissingYears();
     const user = await getCurrentUser();
     userId.value = user?.$id ?? null;
     if (!userId.value) {
@@ -498,7 +732,7 @@ const loadEntries = async () => {
       selectedCategoryId.value = incomeCategoryId.value || uncategorizedId.value;
     }
     const result = await listEntries(selectedMonth.value, userId.value);
-    entries.value = result.documents;
+    entries.value = result.documents.filter(matchesSelectedYear);
   } catch (error) {
     errorMessage.value = error?.message || "Could not load entries.";
   } finally {
@@ -506,8 +740,31 @@ const loadEntries = async () => {
   }
 };
 
-watch(selectedMonth, loadEntries, { immediate: true });
+watch([selectedMonth, selectedYear], loadEntries, { immediate: true });
 loadPreferences();
+
+watch([isModalOpen, entryType], async ([open]) => {
+  if (!open) {
+    showScrollHint.value = false;
+    if (entryScrollObserver) {
+      entryScrollObserver.disconnect();
+      entryScrollObserver = null;
+    }
+    return;
+  }
+  await nextTick();
+  updateScrollHint();
+  if (entryScrollBody.value && window.ResizeObserver) {
+    entryScrollObserver = new ResizeObserver(updateScrollHint);
+    entryScrollObserver.observe(entryScrollBody.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (entryScrollObserver) {
+    entryScrollObserver.disconnect();
+  }
+});
 
 watch(entryType, (value) => {
   if (editingId.value) return;
@@ -516,6 +773,13 @@ watch(entryType, (value) => {
   } else {
     selectedCategoryId.value = uncategorizedId.value;
   }
+});
+
+const filteredEntries = computed(() => {
+  if (!selectedCategoryFilters.value.length) return entries.value;
+  return entries.value.filter((entry) =>
+    selectedCategoryFilters.value.includes(entry.categoryId)
+  );
 });
 
 const incomeTotal = computed(() =>
@@ -532,6 +796,13 @@ const expenseTotal = computed(() =>
 
 const balanceTotal = computed(
   () => (incomeTotal.value ?? 0) - (expenseTotal.value ?? 0)
+);
+
+const filteredTotal = computed(() =>
+  filteredEntries.value.reduce((sum, entry) => {
+    const amount = Number(entry.amount) || 0;
+    return entry.type === "expense" ? sum - amount : sum + amount;
+  }, 0)
 );
 
 const categoryNameById = computed(() =>
@@ -577,20 +848,23 @@ const onCopyMonth = async () => {
     userId.value = user?.$id ?? null;
     if (!userId.value) return;
     const source = await listEntries(copySourceMonth.value, userId.value);
-    const tasks = source.documents.map((entry) =>
-      createEntry(
-        {
-          name: entry.name,
-          amount: entry.amount,
-          type: entry.type,
-          month: selectedMonth.value,
-          userId: userId.value,
-          dueDay: entry.dueDay ?? null,
-          categoryId: entry.categoryId ?? uncategorizedId.value,
-        },
-        userId.value
-      )
-    );
+    const tasks = source.documents
+      .filter(matchesSelectedYear)
+      .map((entry) =>
+        createEntry(
+          {
+            name: entry.name,
+            amount: entry.amount,
+            type: entry.type,
+            month: selectedMonth.value,
+            year: selectedYear.value,
+            userId: userId.value,
+            dueDay: entry.dueDay ?? null,
+            categoryId: entry.categoryId ?? uncategorizedId.value,
+          },
+          userId.value
+        )
+      );
     await Promise.all(tasks);
     await loadEntries();
     closeCopyModal();
@@ -607,6 +881,169 @@ const closeClearModal = () => {
   isClearOpen.value = false;
 };
 
+const openTemplateModal = async () => {
+  await loadTemplates();
+  isTemplateOpen.value = true;
+};
+
+const closeTemplateModal = () => {
+  isTemplateOpen.value = false;
+  templateName.value = "";
+  templateError.value = "";
+  templateSuccess.value = "";
+};
+
+const loadTemplates = async () => {
+  templateError.value = "";
+  try {
+    const user = await getCurrentUser();
+    userId.value = user?.$id ?? null;
+    if (!userId.value) {
+      templates.value = [];
+      return;
+    }
+    const result = await listTemplates(userId.value);
+    templates.value = result.documents;
+  } catch (error) {
+    templateError.value = error?.message || "Could not load templates.";
+  }
+};
+
+const normalizeTemplateEntries = () =>
+  entries.value.map((entry) => ({
+    name: entry.name,
+    amount: entry.amount,
+    type: entry.type,
+    dueDay: entry.dueDay ?? null,
+    categoryId: entry.categoryId ?? uncategorizedId.value,
+  }));
+
+const onSaveTemplate = async () => {
+  templateError.value = "";
+  templateSuccess.value = "";
+  const trimmedName = templateName.value.trim();
+  if (!trimmedName) {
+    templateError.value = "Template name is required.";
+    return;
+  }
+  if (!entries.value.length) {
+    templateError.value = "Current month has no entries.";
+    return;
+  }
+  try {
+    const user = await getCurrentUser();
+    userId.value = user?.$id ?? null;
+    if (!userId.value) return;
+    const payload = {
+      name: trimmedName,
+      userId: userId.value,
+      data: JSON.stringify(normalizeTemplateEntries()),
+    };
+    await createTemplate(payload, userId.value);
+    templateSuccess.value = "Template saved.";
+    templateName.value = "";
+    await loadTemplates();
+  } catch (error) {
+    templateError.value = error?.message || "Could not save template.";
+  }
+};
+
+const parseTemplateData = (template) => {
+  try {
+    return JSON.parse(template.data || "[]");
+  } catch {
+    return [];
+  }
+};
+
+const templateCount = (template) => parseTemplateData(template).length;
+
+const onApplyTemplate = async (template) => {
+  templateError.value = "";
+  templateSuccess.value = "";
+  try {
+    const user = await getCurrentUser();
+    userId.value = user?.$id ?? null;
+    if (!userId.value) return;
+    const items = parseTemplateData(template);
+    const tasks = items.map((entry) =>
+      createEntry(
+        {
+          name: entry.name || "Untitled",
+          amount: Number(entry.amount) || 0,
+          type: entry.type || "expense",
+          month: selectedMonth.value,
+          year: selectedYear.value,
+          userId: userId.value,
+          dueDay: entry.dueDay ?? null,
+          categoryId: entry.categoryId ?? uncategorizedId.value,
+        },
+        userId.value
+      )
+    );
+    await Promise.all(tasks);
+    templateSuccess.value = "Template applied.";
+    await loadEntries();
+  } catch (error) {
+    templateError.value = error?.message || "Could not apply template.";
+  }
+};
+
+const onDeleteTemplate = async (template) => {
+  templateError.value = "";
+  templateSuccess.value = "";
+  try {
+    await deleteTemplate(template.$id);
+    templates.value = templates.value.filter((item) => item.$id !== template.$id);
+    templateSuccess.value = "Template deleted.";
+  } catch (error) {
+    templateError.value = error?.message || "Could not delete template.";
+  }
+};
+
+const openTemplateConfirm = (action, template) => {
+  templateAction.value = action;
+  selectedTemplate.value = template;
+  isTemplateConfirmOpen.value = true;
+};
+
+const closeTemplateConfirm = () => {
+  isTemplateConfirmOpen.value = false;
+  templateAction.value = "";
+  selectedTemplate.value = null;
+};
+
+const templateConfirmTitle = computed(() =>
+  templateAction.value === "delete" ? "Delete template" : "Apply template"
+);
+
+const templateConfirmText = computed(() => {
+  if (!selectedTemplate.value) return "";
+  const name = selectedTemplate.value.name || "this template";
+  return templateAction.value === "delete"
+    ? `Are you sure you want to delete "${name}"?`
+    : `Apply "${name}" to ${selectedMonth.value} ${selectedYear.value}?`;
+});
+
+const templateConfirmActionLabel = computed(() =>
+  templateAction.value === "delete" ? "Delete" : "Apply"
+);
+
+const confirmTemplateAction = async () => {
+  if (!selectedTemplate.value) return;
+  isTemplateActioning.value = true;
+  try {
+    if (templateAction.value === "delete") {
+      await onDeleteTemplate(selectedTemplate.value);
+    } else {
+      await onApplyTemplate(selectedTemplate.value);
+    }
+    closeTemplateConfirm();
+  } finally {
+    isTemplateActioning.value = false;
+  }
+};
+
 const confirmClearMonth = async () => {
   errorMessage.value = "";
   try {
@@ -614,7 +1051,9 @@ const confirmClearMonth = async () => {
     userId.value = user?.$id ?? null;
     if (!userId.value) return;
     const result = await listEntries(selectedMonth.value, userId.value);
-    const tasks = result.documents.map((entry) => deleteEntry(entry.$id));
+    const tasks = result.documents
+      .filter(matchesSelectedYear)
+      .map((entry) => deleteEntry(entry.$id));
     await Promise.all(tasks);
     await loadEntries();
     closeClearModal();
@@ -628,7 +1067,7 @@ const sortedEntries = computed(() => {
   const nameById = Object.fromEntries(
     categories.value.map((category) => [category.$id, category.name])
   );
-  return [...entries.value].sort((a, b) => {
+  return [...filteredEntries.value].sort((a, b) => {
     const typeDiff = (priority[a.type] ?? 2) - (priority[b.type] ?? 2);
     if (typeDiff !== 0) return typeDiff;
     const aCategory = nameById[a.categoryId] || "Uncategorized";
@@ -638,4 +1077,21 @@ const sortedEntries = computed(() => {
     return a.name.localeCompare(b.name);
   });
 });
+
+const toggleCategoryFilter = (categoryId) => {
+  const next = new Set(selectedCategoryFilters.value);
+  if (next.has(categoryId)) {
+    next.delete(categoryId);
+  } else {
+    next.add(categoryId);
+  }
+  selectedCategoryFilters.value = [...next];
+};
+
+const clearCategoryFilters = () => {
+  selectedCategoryFilters.value = [];
+};
+
+const isCategorySelected = (categoryId) =>
+  selectedCategoryFilters.value.includes(categoryId);
 </script>

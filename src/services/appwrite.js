@@ -20,6 +20,8 @@ const databaseId = import.meta.env.VITE_APPWRITE_DATABASE_ID;
 const collectionId = import.meta.env.VITE_APPWRITE_COLLECTION_ID;
 const categoryCollectionId =
   import.meta.env.VITE_APPWRITE_CATEGORY_COLLECTION_ID;
+const templateCollectionId =
+  import.meta.env.VITE_APPWRITE_TEMPLATE_COLLECTION_ID;
 const teamId = import.meta.env.VITE_APPWRITE_TEAM_ID;
 
 export const loginWithEmail = (email, password) =>
@@ -95,12 +97,23 @@ export const updateCategory = (documentId, data) =>
 export const deleteCategory = (documentId) =>
   databases.deleteDocument(databaseId, categoryCollectionId, documentId);
 
+export const listTemplates = (userId) =>
+  databases.listDocuments(databaseId, templateCollectionId, [
+    Query.equal("userId", userId),
+    Query.orderAsc("name"),
+  ]);
+
+export const createTemplate = (data, userId) =>
+  databases.createDocument(databaseId, templateCollectionId, ID.unique(), data, [
+    Permission.read(Role.user(userId)),
+    Permission.update(Role.user(userId)),
+    Permission.delete(Role.user(userId)),
+  ]);
+
+export const deleteTemplate = (documentId) =>
+  databases.deleteDocument(databaseId, templateCollectionId, documentId);
+
 export const listTeamMemberships = () => teams.listMemberships(teamId);
 
-export const inviteTeamMember = (email, roles, url, name) => {
-  const payload = { teamId, roles, email, url };
-  if (name && name.trim().length > 0) {
-    payload.name = name.trim();
-  }
-  return teams.createMembership(payload);
-};
+export const updatePassword = (password, oldPassword) =>
+  account.updatePassword(password, oldPassword);
