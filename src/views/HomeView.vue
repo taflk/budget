@@ -7,25 +7,35 @@
     <template #actions>
       <p class="today-text">Today · {{ todayLabel }}</p>
       <div class="month-tabs">
-        <span class="month-tabs__label">Month</span>
-        <div class="month-tabs__buttons">
-          <button
-            v-for="month in visibleMonths"
-            :key="month"
-            type="button"
-            class="month-tab"
-            :class="{ 'month-tab--active': selectedMonth === month }"
-            @click="selectedMonth = month"
-          >
-            {{ month }}
-          </button>
-          <button
-            type="button"
-            class="month-tab month-tab--more"
-            @click="showAllMonths = !showAllMonths"
-          >
-            {{ showAllMonths ? "Less" : "More" }}
-          </button>
+        <div class="month-tabs__row">
+          <span class="month-tabs__label">Year</span>
+          <select v-model.number="selectedYear" class="month-tabs__select">
+            <option v-for="year in years" :key="year" :value="year">
+              {{ year }}
+            </option>
+          </select>
+        </div>
+        <div class="month-tabs__row">
+          <span class="month-tabs__label">Month</span>
+          <div class="month-tabs__buttons">
+            <button
+              v-for="month in visibleMonths"
+              :key="month"
+              type="button"
+              class="month-tab"
+              :class="{ 'month-tab--active': selectedMonth === month }"
+              @click="selectedMonth = month"
+            >
+              {{ month }}
+            </button>
+            <button
+              type="button"
+              class="month-tab month-tab--more"
+              @click="showAllMonths = !showAllMonths"
+            >
+              {{ showAllMonths ? "Less" : "More" }}
+            </button>
+          </div>
         </div>
       </div>
     </template>
@@ -64,9 +74,12 @@
       </div>
     </div> -->
 
-    <div class="chart">
+    <div class="chart chart--ruled">
       <div class="chart__header">
-        <p class="stat-label">Expenses by category</p>
+        <p class="stat-label">
+          Expenses · {{ selectedMonth }} · {{ selectedYear }} by category
+        </p>
+        <div></div>
       </div>
       <div v-if="expenseByCategory.length === 0" class="empty-state">
         <p>No expenses for this month.</p>
@@ -90,6 +103,54 @@
               :style="{
                 width: `${(row.amount / maxCategoryAmount) * 100}%`,
                 background: row.color,
+              }"
+            />
+          </div>
+          <span class="chart__value">{{ formatCurrency(row.amount) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart">
+      <div class="chart__header">
+        <p class="stat-label">Monthly totals · {{ selectedYear }}</p>
+        <div class="chart-toggle">
+          <button
+            type="button"
+            class="month-tab chart-toggle__button"
+            :class="{ 'month-tab--active': chartMode === 'income' }"
+            @click="chartMode = 'income'"
+          >
+            Income
+          </button>
+          <button
+            type="button"
+            class="month-tab chart-toggle__button"
+            :class="{ 'month-tab--active': chartMode === 'expense' }"
+            @click="chartMode = 'expense'"
+          >
+            Expenses
+          </button>
+        </div>
+      </div>
+      <div v-if="yearlyTotals.length === 0" class="empty-state">
+        <p>No entries for {{ selectedYear }}.</p>
+      </div>
+      <div v-else class="chart__rows">
+        <div
+          v-for="row in yearlyTotals"
+          :key="row.month"
+          class="chart__row"
+        >
+          <div class="chart__label">
+            <span>{{ row.month }}</span>
+          </div>
+          <div class="chart__bar">
+            <span
+              class="chart__fill"
+              :style="{
+                width: `${(row.amount / maxYearAmount) * 100}%`,
+                background: chartMode === 'income' ? '#2c6e63' : '#b24a3b',
               }"
             />
           </div>
@@ -139,12 +200,21 @@ const months = [
   "December",
 ];
 
+const currentYear = new Date().getFullYear();
 const selectedMonth = ref(months[new Date().getMonth()]);
+const selectedYear = ref(currentYear);
 const showAllMonths = ref(false);
+const chartMode = ref("income");
 const entries = ref([]);
+const yearEntries = ref([]);
 const userId = ref(null);
 const categories = ref([]);
 const today = new Date();
+const years = computed(() => {
+  const start = currentYear - 3;
+  const end = currentYear + 3;
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+});
 
 const visibleMonths = computed(() => {
   if (showAllMonths.value) return months;
@@ -201,6 +271,21 @@ const remainingToPay = computed(() => {
   return total;
 });
 
+const normalizeYear = (value) => {
+  if (Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const matchesSelectedYear = (entry) => {
+  const entryYear = normalizeYear(entry.year);
+  if (Number.isFinite(entryYear)) return entryYear === selectedYear.value;
+  return selectedYear.value === currentYear;
+};
+
 const loadEntries = async () => {
   try {
     const user = await getCurrentUser();
@@ -212,13 +297,33 @@ const loadEntries = async () => {
     const categoryResult = await listCategories(userId.value);
     categories.value = categoryResult.documents;
     const result = await listEntries(selectedMonth.value, userId.value);
-    entries.value = result.documents;
+    entries.value = result.documents.filter(matchesSelectedYear);
   } catch {
     entries.value = [];
   }
 };
 
-watch(selectedMonth, loadEntries, { immediate: true });
+const loadYearEntries = async () => {
+  try {
+    const user = await getCurrentUser();
+    userId.value = user?.$id ?? null;
+    if (!userId.value) {
+      yearEntries.value = [];
+      return;
+    }
+    const results = await Promise.all(
+      months.map((month) => listEntries(month, userId.value))
+    );
+    yearEntries.value = results
+      .flatMap((result) => result.documents)
+      .filter(matchesSelectedYear);
+  } catch {
+    yearEntries.value = [];
+  }
+};
+
+watch([selectedMonth, selectedYear], loadEntries, { immediate: true });
+watch(selectedYear, loadYearEntries, { immediate: true });
 loadPreferences();
 
 const categoryNameById = computed(() =>
@@ -251,6 +356,23 @@ const expenseByCategory = computed(() => {
 
 const maxCategoryAmount = computed(() =>
   Math.max(0, ...expenseByCategory.value.map((row) => row.amount))
+);
+
+const yearlyTotals = computed(() => {
+  if (yearEntries.value.length === 0) return [];
+  const totals = months.map((month) => {
+    const amount = yearEntries.value
+      .filter((entry) => entry.month === month)
+      .filter((entry) => entry.type === chartMode.value)
+      .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+    return { month, amount };
+  });
+  const hasValues = totals.some((row) => row.amount > 0);
+  return hasValues ? totals : [];
+});
+
+const maxYearAmount = computed(() =>
+  Math.max(0, ...yearlyTotals.value.map((row) => row.amount))
 );
 
 const todayLabel = new Intl.DateTimeFormat("en-GB", {
