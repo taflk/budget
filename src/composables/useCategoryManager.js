@@ -9,6 +9,7 @@ import {
 export const useCategoryManager = () => {
   const categories = ref([]);
   const categoryError = ref("");
+  const normalizeCategoryName = (value) => (value || "").trim().toLowerCase();
 
   const normalizeHex = (value) => {
     const raw = value.trim().replace(/^#/, "");
@@ -77,14 +78,32 @@ export const useCategoryManager = () => {
   const addDefaultCategories = async (userId, defaults) => {
     categoryError.value = "";
     if (!userId) return;
+    let existingCategories = categories.value;
+    if (existingCategories.length === 0) {
+      try {
+        const result = await listCategories(userId);
+        existingCategories = result.documents;
+        categories.value = result.documents.map((category) => ({
+          ...category,
+          hexInput: category.color,
+        }));
+      } catch (error) {
+        categoryError.value = error?.message || "Could not load categories.";
+        return;
+      }
+    }
     const existing = new Set(
-      categories.value.map((category) => category.name.toLowerCase())
+      existingCategories
+        .map((category) => normalizeCategoryName(category.name))
+        .filter(Boolean)
     );
     const created = [];
     for (const category of defaults) {
-      if (existing.has(category.name.toLowerCase())) continue;
+      const key = normalizeCategoryName(category.name);
+      if (!key || existing.has(key)) continue;
       const result = await createCategory({ ...category, userId }, userId);
       created.push({ ...result, hexInput: result.color });
+      existing.add(key);
     }
     if (created.length > 0) {
       categories.value = [...categories.value, ...created].sort((a, b) =>
