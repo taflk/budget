@@ -7,7 +7,7 @@ import CalendarView from "../views/CalendarView.vue";
 import { getCurrentUser } from "../services/appwrite.js";
 
 const routes = [
-  { path: "/", redirect: "/login" },
+  { path: "/", redirect: "/home" },
   {
     path: "/login",
     name: "login",
@@ -26,8 +26,13 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
-  if (to.meta.public) return true;
   const user = await getCurrentUser();
+  if (to.meta.public) {
+    if (user && to.name === "login") {
+      return { path: to.query.redirect || "/home" };
+    }
+    return true;
+  }
   if (!user) {
     return { name: "login", query: { redirect: to.fullPath } };
   }

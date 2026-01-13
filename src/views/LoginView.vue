@@ -42,7 +42,7 @@
 
 <script setup>
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import AuthCard from "../components/AuthCard.vue";
 import BaseButton from "../components/BaseButton.vue";
 import BaseInput from "../components/BaseInput.vue";
@@ -54,13 +54,14 @@ const error = ref("");
 const isSubmitting = ref(false);
 const isCreating = ref(false);
 const router = useRouter();
+const route = useRoute();
 
 const onSubmit = async () => {
   error.value = "";
   isSubmitting.value = true;
   try {
     await loginWithEmail(email.value.trim(), password.value);
-    await router.push("/home");
+    await router.push(route.query.redirect || "/home");
   } catch (err) {
     error.value =
       err?.message || "Could not sign in. Check your email and password.";
@@ -77,7 +78,7 @@ const onCreateAccount = async () => {
     const displayName = trimmedEmail.split("@")[0] || "User";
     await createAccount(trimmedEmail, password.value, displayName);
     await loginWithEmail(trimmedEmail, password.value);
-    await router.push("/home");
+    await router.push(route.query.redirect || "/home");
   } catch (err) {
     error.value =
       err?.message || "Could not create account. Please try again.";
