@@ -5,19 +5,7 @@
     subtitle="See when bills should be paid."
   >
     <template #actions>
-      <div v-if="categories.length" class="category-legend">
-        <span
-          v-for="category in categories"
-          :key="category.$id"
-          class="category-pill"
-        >
-          <span
-            class="category-dot"
-            :style="{ background: category.color }"
-          />
-          {{ category.name }}
-        </span>
-      </div>
+      <CategoryLegend :categories="categories" />
     </template>
 
     <div class="calendar">
@@ -87,147 +75,76 @@
       </div>
     </div>
 
-    <div v-if="isModalOpen" class="modal-backdrop" @click.self="closeModal">
-      <div class="modal" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>Bills due</h2>
-          <button class="modal__close" type="button" @click="closeModal">
-            Close
-          </button>
-        </header>
-        <div class="modal__body modal__body--scroll">
-          <p class="modal__hint">Selected date: {{ selectedLabel }}</p>
-          <div v-if="selectedBills.length === 0" class="empty-state">
-            <p>No bills due on this date.</p>
-          </div>
-          <div v-else class="entry-list">
-            <div
-              v-for="bill in selectedBills"
-              :key="bill.$id"
-              class="entry-card"
-            >
-              <div>
-                <p class="entry-title">{{ bill.name }}</p>
-                <p class="entry-meta">
-                  {{ formatCurrency(bill.amount) }} ·
-                  {{ bill.month }}
-                  <span v-if="bill.categoryId">
-                    ·
-                    {{ categoryNameById[bill.categoryId] || "Uncategorized" }}
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+    <BaseModal
+      v-if="isModalOpen"
+      title="Bills due"
+      scroll-body
+      @close="closeModal"
+    >
+      <p class="modal__hint">Selected date: {{ selectedLabel }}</p>
+      <div v-if="selectedBills.length === 0" class="empty-state">
+        <p>No bills due on this date.</p>
       </div>
-    </div>
+      <EntryList v-else>
+        <EntryCard v-for="bill in selectedBills" :key="bill.$id">
+          <template #title>{{ bill.name }}</template>
+          <template #meta>
+            {{ formatCurrency(bill.amount) }} ·
+            {{ bill.month }}
+            <span v-if="bill.categoryId">
+              ·
+              {{ categoryNameById[bill.categoryId] || "Uncategorized" }}
+            </span>
+          </template>
+        </EntryCard>
+      </EntryList>
+    </BaseModal>
   </DashboardLayout>
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import BaseButton from "../components/BaseButton.vue";
+import BaseModal from "../components/BaseModal.vue";
+import CategoryLegend from "../components/CategoryLegend.vue";
 import DashboardLayout from "../components/DashboardLayout.vue";
-import { getCurrentUser, listCategories, listEntries } from "../services/appwrite.js";
-import { formatCurrency, loadPreferences } from "../services/currency.js";
+import EntryCard from "../components/EntryCard.vue";
+import EntryList from "../components/EntryList.vue";
+import { useCalendarData } from "../composables/useCalendarData.js";
+import { useCategories } from "../composables/useCategories.js";
+import { useMonths } from "../composables/useMonths.js";
+import { usePreferences } from "../composables/usePreferences.js";
+import { useUser } from "../composables/useUser.js";
 
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const months = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+const { months } = useMonths();
+const { userId, loadUser } = useUser();
+const { categories, loadCategories, categoryColorById } = useCategories();
+const { formatCurrency, loadPreferences } = usePreferences();
 
 const today = new Date();
 const monthIndex = ref(today.getMonth());
 const year = ref(today.getFullYear());
 const isModalOpen = ref(false);
 const selectedDay = ref(null);
-const entries = ref([]);
-const userId = ref(null);
-const categories = ref([]);
 
-const monthLabel = computed(() => months[monthIndex.value]);
-
-const daysInMonth = computed(
-  () => new Date(year.value, monthIndex.value + 1, 0).getDate()
-);
-
-const firstWeekdayIndex = computed(() => {
-  const weekday = new Date(year.value, monthIndex.value, 1).getDay();
-  return weekday === 0 ? 6 : weekday - 1;
-});
-
-const calendarCells = computed(() => {
-  const cells = [];
-  const totalCells = firstWeekdayIndex.value + daysInMonth.value;
-  const totalSlots = Math.ceil(totalCells / 7) * 7;
-
-  for (let i = 0; i < totalSlots; i += 1) {
-    const day = i - firstWeekdayIndex.value + 1;
-    const isEmpty = day < 1 || day > daysInMonth.value;
-    const isToday =
-      !isEmpty &&
-      day === today.getDate() &&
-      year.value === today.getFullYear() &&
-      monthIndex.value === today.getMonth();
-
-    cells.push({
-      key: `${year.value}-${monthIndex.value}-${i}`,
-      day,
-      isEmpty,
-      isToday,
-    });
-  }
-
-  return cells;
-});
-
-const monthName = computed(() => months[monthIndex.value]);
-
-const billsByDay = computed(() => {
-  const map = {};
-  entries.value.forEach((entry) => {
-    if (entry.type !== "expense") return;
-    if (!Number.isFinite(entry.dueDay)) return;
-    const day = entry.dueDay;
-    if (!map[day]) map[day] = [];
-    map[day].push(entry);
-  });
-  return map;
-});
-
-const categoryColorById = computed(() =>
-  Object.fromEntries(
-    categories.value.map((category) => [category.$id, category.color])
-  )
-);
-
-const categoryNameById = computed(() =>
-  Object.fromEntries(
-    categories.value.map((category) => [category.$id, category.name])
-  )
-);
-
-const billDots = computed(() => {
-  const dots = {};
-  Object.entries(billsByDay.value).forEach(([day, bills]) => {
-    const colors = bills
-      .map((bill) => categoryColorById.value[bill.categoryId] || "#c9c1b5")
-      .filter((value, index, self) => self.indexOf(value) === index);
-    dots[day] = colors.slice(0, 4);
-  });
-  return dots;
+const {
+  monthLabel,
+  calendarCells,
+  billsByDay,
+  billDots,
+  selectedLabel,
+  selectedBills,
+  loadBills,
+} = useCalendarData({
+  months,
+  monthIndex,
+  year,
+  selectedDay,
+  userId,
+  loadUser,
+  loadCategories,
+  categoryColorById,
 });
 
 const goPrevious = () => {
@@ -258,33 +175,108 @@ const closeModal = () => {
   selectedDay.value = null;
 };
 
-const selectedLabel = computed(() => {
-  if (!selectedDay.value) return "";
-  return `${monthLabel.value} ${selectedDay.value}, ${year.value}`;
-});
-
-const selectedBills = computed(() => {
-  if (!selectedDay.value) return [];
-  return billsByDay.value[selectedDay.value] ?? [];
-});
-
-const loadBills = async () => {
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) {
-      entries.value = [];
-      return;
-    }
-    const categoryResult = await listCategories(userId.value);
-    categories.value = categoryResult.documents;
-    const result = await listEntries(monthName.value, userId.value);
-    entries.value = result.documents;
-  } catch {
-    entries.value = [];
-  }
-};
-
 watch([monthIndex, year], loadBills, { immediate: true });
 loadPreferences();
 </script>
+
+<style scoped>
+.calendar {
+  display: grid;
+  gap: 16px;
+}
+
+.calendar__header {
+  display: grid;
+  gap: 8px;
+}
+
+.calendar__title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.calendar__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.calendar__subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: #7a6f63;
+}
+
+.calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calendar__grid--weekdays {
+  gap: 4px;
+}
+
+.calendar__weekday {
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: #7a6f63;
+}
+
+.calendar__cell {
+  min-height: 72px;
+  border-radius: var(--radius-sm);
+  background: #fbfaf7;
+  border: 1px solid rgba(24, 19, 10, 0.08);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.calendar__cell--empty {
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+}
+
+.calendar__cell--today {
+  border-color: #2c6e63;
+}
+
+.calendar__day {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: #1f1d1a;
+}
+
+.calendar__items {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.calendar__more {
+  margin: 0;
+  font-size: 11px;
+  color: #7a6f63;
+}
+
+.calendar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+}
+
+.calendar-actions {
+  display: flex;
+  gap: 10px;
+  padding: 10px 0;
+  justify-content: flex-end;
+}
+</style>

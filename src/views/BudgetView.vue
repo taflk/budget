@@ -5,38 +5,16 @@
     subtitle="Plan your yearly budget."
   >
     <template #actions>
-      <div class="month-tabs">
-        <div class="month-tabs__row">
-          <span class="month-tabs__label">Year</span>
-          <select v-model.number="selectedYear" class="month-tabs__select">
-            <option v-for="year in years" :key="year" :value="year">
-              {{ year }}
-            </option>
-          </select>
-        </div>
-        <div class="month-tabs__row">
-          <span class="month-tabs__label">Month</span>
-          <div class="month-tabs__buttons">
-            <button
-              v-for="month in visibleMonths"
-              :key="month"
-              type="button"
-              class="month-tab"
-              :class="{ 'month-tab--active': selectedMonth === month }"
-              @click="selectedMonth = month"
-            >
-              {{ month }}
-            </button>
-            <button
-              type="button"
-              class="month-tab month-tab--more"
-              @click="showAllMonths = !showAllMonths"
-            >
-              {{ showAllMonths ? "Less" : "More" }}
-            </button>
-          </div>
-        </div>
-      </div>
+      <MonthTabs
+        :years="years"
+        :selected-year="selectedYear"
+        :visible-months="visibleMonths"
+        :selected-month="selectedMonth"
+        :show-all="showAllMonths"
+        @update:selected-year="selectedYear = $event"
+        @update:selected-month="selectedMonth = $event"
+        @toggle-show-all="showAllMonths = !showAllMonths"
+      />
       <div class="action-row action-row--spread action-row--ruled">
         <div class="action-row">
           <BaseButton
@@ -78,30 +56,13 @@
           {{ formatCurrency(balanceTotal) }}
         </div>
       </div>
-      <div v-if="categories.length" class="category-legend">
-        <button
-          v-for="category in categories"
-          :key="category.$id"
-          type="button"
-          class="category-pill category-pill--button"
-          :class="{ 'category-pill--active': isCategorySelected(category.$id) }"
-          @click="toggleCategoryFilter(category.$id)"
-        >
-          <span
-            class="category-dot"
-            :style="{ background: category.color }"
-          />
-          {{ category.name }}
-        </button>
-        <button
-          v-if="selectedCategoryFilters.length"
-          type="button"
-          class="category-pill category-pill--clear"
-          @click="clearCategoryFilters"
-        >
-          Clear
-        </button>
-      </div>
+      <CategoryLegend
+        :categories="categories"
+        :selected="selectedCategoryFilters"
+        selectable
+        @toggle="toggleCategoryFilter"
+        @clear="clearCategoryFilters"
+      />
       <p
         v-if="selectedCategoryFilters.length"
         class="category-legend-total"
@@ -114,25 +75,22 @@
     <div v-if="filteredEntries.length === 0" class="empty-state">
       <p>No entries for {{ selectedMonth }}.</p>
     </div>
-    <div v-else class="entry-list">
-      <div
+    <EntryList v-else>
+      <EntryCard
         v-for="entry in sortedEntries"
         :key="entry.$id"
-        class="entry-card"
         :style="entryCardStyle(entry)"
       >
-        <div>
-          <p class="entry-title">{{ entry.name }}</p>
-          <p class="entry-meta">
-            {{ entry.type === "income" ? "Income" : "Expense" }} ·
-            {{ entry.month }} {{ entry.year || selectedYear }}
-            <span v-if="entry.categoryId">
-              ·
-              {{ categoryNameById[entry.categoryId] || "Uncategorized" }}
-            </span>
-          </p>
-        </div>
-        <div class="entry-actions">
+        <template #title>{{ entry.name }}</template>
+        <template #meta>
+          {{ entry.type === "income" ? "Income" : "Expense" }} ·
+          {{ entry.month }} {{ entry.year || selectedYear }}
+          <span v-if="entry.categoryId">
+            ·
+            {{ categoryNameById[entry.categoryId] || "Uncategorized" }}
+          </span>
+        </template>
+        <template #trailing>
           <p class="entry-amount">
             {{ formatCurrency(entry.amount) }}
           </p>
@@ -180,310 +138,322 @@
               </svg>
             </button>
           </div>
-        </div>
-      </div>
-    </div>
+        </template>
+      </EntryCard>
+    </EntryList>
 
-    <div v-if="isModalOpen" class="modal-backdrop" @click.self="closeModal">
-      <div class="modal entry-modal" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>{{ isEditing ? "Edit entry" : "New entry" }}</h2>
-          <button class="modal__close" type="button" @click="closeModal">
-            Close
-          </button>
-        </header>
-        <div class="modal__body entry-modal__body">
-          <div class="entry-scroll">
-            <div ref="entryScrollBody" class="entry-scroll__body">
-              <div class="modal__toggle">
-                <button
-                  type="button"
-                  class="toggle-button"
-                  :class="{ 'toggle-button--active': entryType === 'income' }"
-                  @click="entryType = 'income'"
-                >
-                  Income
-                </button>
-                <button
-                  type="button"
-                  class="toggle-button"
-                  :class="{ 'toggle-button--active': entryType === 'expense' }"
-                  @click="entryType = 'expense'"
-                >
-                  Expense
-                </button>
-              </div>
-              <div class="modal__form">
-                <label class="field">
-                  <span>Name</span>
-                  <input
-                    v-model="entryName"
-                    type="text"
-                    placeholder="Salary, Rent, Groceries"
-                  />
-                </label>
-                <label class="field">
-                  <span>Amount</span>
-                  <input
-                    v-model="amount"
-                    type="number"
-                    inputmode="decimal"
-                    placeholder="0"
-                  />
-                </label>
-                <label v-if="entryType === 'expense'" class="field">
-                  <span>Due day (1-31)</span>
-                  <input
-                    v-model.number="dueDay"
-                    type="number"
-                    min="1"
-                    max="31"
-                    step="1"
-                    placeholder="1"
-                  />
-                </label>
-                <label v-if="entryType === 'expense'" class="field">
-                  <span>Category</span>
-                  <select v-model="selectedCategoryId">
-                    <option value="">Uncategorized</option>
-                    <option
-                      v-for="category in categories"
-                      :key="category.$id"
-                      :value="category.$id"
-                    >
-                      {{ category.name }}
-                    </option>
-                  </select>
-                </label>
-              </div>
-            </div>
-            <div v-if="showScrollHint" class="entry-scroll__hint">
-              Scroll for more
-            </div>
-          </div>
-          <div class="entry-modal__footer">
-            <BaseButton
-              variant="primary"
-              type="button"
-              class="entry-modal__submit"
-              @click="onSaveEntry"
-            >
-              {{ isEditing ? "Save" : "Add" }}
-            </BaseButton>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div
-      v-if="isDeleteOpen"
-      class="modal-backdrop"
-      @click.self="closeDeleteModal"
+    <BaseModal
+      v-if="isModalOpen"
+      :title="isEditing ? 'Edit entry' : 'New entry'"
+      content-class="entry-modal"
+      body-class="entry-modal__body"
+      @close="closeModal"
     >
-      <div class="modal modal--compact" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>Delete entry</h2>
-          <button class="modal__close" type="button" @click="closeDeleteModal">
-            Close
-          </button>
-        </header>
-        <div class="modal__body">
-          <p>Do you really want to delete?</p>
-          <div class="action-row">
-            <BaseButton variant="ghost" type="button" @click="closeDeleteModal">
-              No
-            </BaseButton>
-            <BaseButton variant="primary" type="button" @click="confirmDelete">
-              Yes
-            </BaseButton>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div
-      v-if="isCopyOpen"
-      class="modal-backdrop"
-      @click.self="closeCopyModal"
-    >
-      <div class="modal modal--compact" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>Copy month</h2>
-          <button class="modal__close" type="button" @click="closeCopyModal">
-            Close
-          </button>
-        </header>
-        <div class="modal__body">
-          <p>Choose a month to copy from.</p>
-          <div class="month-tabs__buttons">
+      <div class="entry-scroll">
+        <div ref="entryScrollBody" class="entry-scroll__body">
+          <div class="modal__toggle">
             <button
-              v-for="month in months"
-              :key="month"
               type="button"
-              class="month-tab"
-              :class="{ 'month-tab--active': copySourceMonth === month }"
-              @click="copySourceMonth = month"
+              class="toggle-button"
+              :class="{ 'toggle-button--active': entryType === 'income' }"
+              @click="entryType = 'income'"
             >
-              {{ month }}
+              Income
+            </button>
+            <button
+              type="button"
+              class="toggle-button"
+              :class="{ 'toggle-button--active': entryType === 'expense' }"
+              @click="entryType = 'expense'"
+            >
+              Expense
             </button>
           </div>
-          <div class="action-row">
-            <BaseButton variant="ghost" type="button" @click="closeCopyModal">
-              Cancel
-            </BaseButton>
-            <BaseButton variant="primary" type="button" @click="onCopyMonth">
-              Copy
-            </BaseButton>
+          <div class="modal__form">
+            <label class="field">
+              <span>Name</span>
+              <input
+                v-model="entryName"
+                type="text"
+                placeholder="Salary, Rent, Groceries"
+              />
+            </label>
+            <label class="field">
+              <span>Amount</span>
+              <input
+                v-model="amount"
+                type="number"
+                inputmode="decimal"
+                placeholder="0"
+              />
+            </label>
+            <label v-if="entryType === 'expense'" class="field">
+              <span>Due day (1-31)</span>
+              <input
+                v-model.number="dueDay"
+                type="number"
+                min="1"
+                max="31"
+                step="1"
+                placeholder="1"
+              />
+            </label>
+            <label v-if="entryType === 'expense'" class="field">
+              <span>Category</span>
+              <select v-model="selectedCategoryId">
+                <option value="">Uncategorized</option>
+                <option
+                  v-for="category in categories"
+                  :key="category.$id"
+                  :value="category.$id"
+                >
+                  {{ category.name }}
+                </option>
+              </select>
+            </label>
           </div>
         </div>
+        <div v-if="showScrollHint" class="entry-scroll__hint">
+          Scroll for more
+        </div>
       </div>
-    </div>
-    <div
+      <div class="entry-modal__footer">
+        <BaseButton
+          variant="primary"
+          type="button"
+          class="entry-modal__submit"
+          @click="onSaveEntry"
+        >
+          {{ isEditing ? "Save" : "Add" }}
+        </BaseButton>
+      </div>
+    </BaseModal>
+    <BaseModal
+      v-if="isDeleteOpen"
+      title="Delete entry"
+      compact
+      @close="closeDeleteModal"
+    >
+      <p>Do you really want to delete?</p>
+      <div class="action-row">
+        <BaseButton variant="ghost" type="button" @click="closeDeleteModal">
+          No
+        </BaseButton>
+        <BaseButton variant="primary" type="button" @click="confirmDelete">
+          Yes
+        </BaseButton>
+      </div>
+    </BaseModal>
+    <BaseModal
+      v-if="isCopyOpen"
+      title="Copy month"
+      compact
+      @close="closeCopyModal"
+    >
+      <p>Choose a month to copy from.</p>
+      <div class="month-tabs__buttons">
+        <button
+          v-for="month in months"
+          :key="month"
+          type="button"
+          class="month-tab"
+          :class="{ 'month-tab--active': copySourceMonth === month }"
+          @click="copySourceMonth = month"
+        >
+          {{ month }}
+        </button>
+      </div>
+      <div class="action-row">
+        <BaseButton variant="ghost" type="button" @click="closeCopyModal">
+          Cancel
+        </BaseButton>
+        <BaseButton variant="primary" type="button" @click="onCopyMonth">
+          Copy
+        </BaseButton>
+      </div>
+    </BaseModal>
+    <BaseModal
       v-if="isClearOpen"
-      class="modal-backdrop"
-      @click.self="closeClearModal"
+      title="Clear month"
+      compact
+      @close="closeClearModal"
     >
-      <div class="modal modal--compact" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>Clear month</h2>
-          <button class="modal__close" type="button" @click="closeClearModal">
-            Close
-          </button>
-        </header>
-        <div class="modal__body">
-          <p>Are you sure you want to delete all entries?</p>
-          <div class="action-row">
-            <BaseButton variant="ghost" type="button" @click="closeClearModal">
-              No
-            </BaseButton>
-            <BaseButton variant="primary" type="button" @click="confirmClearMonth">
-              Yes
-            </BaseButton>
-          </div>
-        </div>
+      <p>Are you sure you want to delete all entries?</p>
+      <div class="action-row">
+        <BaseButton variant="ghost" type="button" @click="closeClearModal">
+          No
+        </BaseButton>
+        <BaseButton variant="primary" type="button" @click="confirmClearMonth">
+          Yes
+        </BaseButton>
       </div>
-    </div>
-    <div
-      v-if="isTemplateOpen"
-      class="modal-backdrop"
-      @click.self="closeTemplateModal"
-    >
-      <div class="modal" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>Templates</h2>
-          <button class="modal__close" type="button" @click="closeTemplateModal">
-            Close
-          </button>
-        </header>
-        <div class="modal__body">
-          <label class="field">
-            <span>Template name</span>
-            <input
-              v-model="templateName"
-              type="text"
-              placeholder="Standard month"
-            />
-          </label>
-          <p v-if="templateError" class="form__error">{{ templateError }}</p>
-          <p v-if="templateSuccess" class="settings-hint">{{ templateSuccess }}</p>
-          <div class="action-row">
-            <BaseButton
-              variant="primary"
+    </BaseModal>
+    <BaseModal v-if="isTemplateOpen" title="Templates" @close="closeTemplateModal">
+      <label class="field">
+        <span>Template name</span>
+        <input
+          v-model="templateName"
+          type="text"
+          placeholder="Standard month"
+        />
+      </label>
+      <p v-if="templateError" class="form__error">{{ templateError }}</p>
+      <p v-if="templateSuccess" class="settings-hint">{{ templateSuccess }}</p>
+      <div class="action-row">
+        <BaseButton
+          variant="primary"
+          type="button"
+          class="template-save-button"
+          @click="onSaveTemplate"
+        >
+          Save current month
+        </BaseButton>
+      </div>
+      <p class="modal__hint">
+        Applying a template adds entries to the selected month.
+      </p>
+      <div v-if="templates.length" class="template-list">
+        <div
+          v-for="template in templates"
+          :key="template.$id"
+          class="template-row"
+        >
+          <div class="template-meta">
+            <p class="template-name">{{ template.name }}</p>
+            <p class="template-count">
+              {{ templateCount(template) }} entries
+            </p>
+          </div>
+          <div class="entry-buttons">
+            <button
               type="button"
-              class="template-save-button"
-              @click="onSaveTemplate"
+              class="entry-button entry-button--secondary"
+              @click="openTemplateConfirm('apply', template)"
             >
-              Save current month
-            </BaseButton>
-          </div>
-          <p class="modal__hint">
-            Applying a template adds entries to the selected month.
-          </p>
-          <div v-if="templates.length" class="template-list">
-            <div
-              v-for="template in templates"
-              :key="template.$id"
-              class="template-row"
+              Apply
+            </button>
+            <button
+              type="button"
+              class="entry-button entry-button--secondary entry-button--danger"
+              @click="openTemplateConfirm('delete', template)"
             >
-              <div class="template-meta">
-                <p class="template-name">{{ template.name }}</p>
-                <p class="template-count">
-                  {{ templateCount(template) }} entries
-                </p>
-              </div>
-              <div class="entry-buttons">
-                <button
-                  type="button"
-                  class="entry-button entry-button--secondary"
-                  @click="openTemplateConfirm('apply', template)"
-                >
-                  Apply
-                </button>
-                <button
-                  type="button"
-                  class="entry-button entry-button--secondary entry-button--danger"
-                  @click="openTemplateConfirm('delete', template)"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
+              Delete
+            </button>
           </div>
-          <p v-else class="settings-hint">No templates yet.</p>
         </div>
       </div>
-    </div>
-    <div
+      <p v-else class="settings-hint">No templates yet.</p>
+    </BaseModal>
+    <BaseModal
       v-if="isTemplateConfirmOpen"
-      class="modal-backdrop"
-      @click.self="closeTemplateConfirm"
+      :title="templateConfirmTitle"
+      compact
+      @close="closeTemplateConfirm"
     >
-      <div class="modal modal--compact" role="dialog" aria-modal="true">
-        <header class="modal__header">
-          <h2>{{ templateConfirmTitle }}</h2>
-          <button class="modal__close" type="button" @click="closeTemplateConfirm">
-            Close
-          </button>
-        </header>
-        <div class="modal__body">
-          <p>{{ templateConfirmText }}</p>
-          <div class="action-row">
-            <BaseButton
-              variant="ghost"
-              type="button"
-              @click="closeTemplateConfirm"
-            >
-              No
-            </BaseButton>
-            <BaseButton
-              variant="primary"
-              type="button"
-              :disabled="isTemplateActioning"
-              @click="confirmTemplateAction"
-            >
-              {{ templateConfirmActionLabel }}
-            </BaseButton>
-          </div>
-        </div>
+      <p>{{ templateConfirmText }}</p>
+      <div class="action-row">
+        <BaseButton
+          variant="ghost"
+          type="button"
+          @click="closeTemplateConfirm"
+        >
+          No
+        </BaseButton>
+        <BaseButton
+          variant="primary"
+          type="button"
+          :disabled="isTemplateActioning"
+          @click="confirmTemplateAction"
+        >
+          {{ templateConfirmActionLabel }}
+        </BaseButton>
       </div>
-    </div>
+    </BaseModal>
   </DashboardLayout>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import BaseButton from "../components/BaseButton.vue";
+import BaseModal from "../components/BaseModal.vue";
+import CategoryLegend from "../components/CategoryLegend.vue";
 import DashboardLayout from "../components/DashboardLayout.vue";
-import { formatCurrency, loadPreferences } from "../services/currency.js";
-import { listCategories } from "../services/appwrite.js";
-import {
-  createEntry,
-  deleteEntry,
-  getCurrentUser,
-  listEntries,
-  createTemplate,
-  deleteTemplate,
-  listTemplates,
-  updateEntry,
-} from "../services/appwrite.js";
+import EntryCard from "../components/EntryCard.vue";
+import EntryList from "../components/EntryList.vue";
+import MonthTabs from "../components/MonthTabs.vue";
+import { useBudgetEntries } from "../composables/useBudgetEntries.js";
+import { useBudgetTemplates } from "../composables/useBudgetTemplates.js";
+import { useCategories } from "../composables/useCategories.js";
+import { useMonths } from "../composables/useMonths.js";
+import { usePreferences } from "../composables/usePreferences.js";
+import { useUser } from "../composables/useUser.js";
+
+const { months, currentYear, selectedMonth, selectedYear, showAllMonths, years, visibleMonths } =
+  useMonths();
+const { userId, loadUser } = useUser();
+const { categories, loadCategories, categoryNameById, categoryColorById } = useCategories();
+const { formatCurrency, loadPreferences } = usePreferences();
+const {
+  entries,
+  isLoading,
+  errorMessage,
+  selectedCategoryFilters,
+  incomeCategoryId,
+  uncategorizedId,
+  loadEntries,
+  saveEntry,
+  deleteEntryById,
+  copyMonth,
+  clearMonth,
+  filteredEntries,
+  sortedEntries,
+  incomeTotal,
+  expenseTotal,
+  balanceTotal,
+  filteredTotal,
+  entryCardStyle,
+  toggleCategoryFilter,
+  clearCategoryFilters,
+} = useBudgetEntries({
+  months,
+  currentYear,
+  selectedMonth,
+  selectedYear,
+  userId,
+  loadUser,
+  categories,
+  loadCategories,
+  categoryNameById,
+  categoryColorById,
+});
+
+const {
+  isTemplateOpen,
+  templates,
+  templateName,
+  templateError,
+  templateSuccess,
+  isTemplateConfirmOpen,
+  templateConfirmTitle,
+  templateConfirmText,
+  templateConfirmActionLabel,
+  isTemplateActioning,
+  openTemplateModal,
+  closeTemplateModal,
+  onSaveTemplate,
+  templateCount,
+  openTemplateConfirm,
+  closeTemplateConfirm,
+  confirmTemplateAction,
+} = useBudgetTemplates({
+  entries,
+  selectedMonth,
+  selectedYear,
+  uncategorizedId,
+  userId,
+  loadUser,
+  loadEntries,
+});
 
 const isModalOpen = ref(false);
 const entryType = ref("income");
@@ -496,62 +466,10 @@ const deleteTargetId = ref(null);
 const isCopyOpen = ref(false);
 const copySourceMonth = ref("");
 const isClearOpen = ref(false);
-const isTemplateOpen = ref(false);
-const templates = ref([]);
-const templateName = ref("");
-const templateError = ref("");
-const templateSuccess = ref("");
-const isTemplateConfirmOpen = ref(false);
-const templateAction = ref("");
-const selectedTemplate = ref(null);
-const isTemplateActioning = ref(false);
-const userId = ref(null);
-const isLoading = ref(false);
-const errorMessage = ref("");
 const entryScrollBody = ref(null);
 const showScrollHint = ref(false);
 let entryScrollObserver = null;
-const categories = ref([]);
-const selectedCategoryFilters = ref([]);
 const selectedCategoryId = ref("");
-const incomeCategoryId = computed(() => {
-  const found = categories.value.find(
-    (category) => category.name.toLowerCase() === "income"
-  );
-  return found?.$id ?? "";
-});
-const uncategorizedId = computed(() => {
-  const found = categories.value.find(
-    (category) => category.name.toLowerCase() === "uncategorized"
-  );
-  return found?.$id ?? "";
-});
-const months = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-const currentYear = new Date().getFullYear();
-const selectedMonth = ref(months[new Date().getMonth()]);
-const selectedYear = ref(currentYear);
-const showAllMonths = ref(false);
-const hasMigratedYears = ref(false);
-const isMigratingYears = ref(false);
-const years = computed(() => {
-  const start = currentYear - 3;
-  const end = currentYear + 3;
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-});
-
 const closeModal = () => {
   isModalOpen.value = false;
   resetForm();
@@ -563,8 +481,6 @@ const updateScrollHint = () => {
     entryScrollBody.value.scrollHeight >
     entryScrollBody.value.clientHeight + 1;
 };
-
-const entries = ref([]);
 
 const resetForm = () => {
   entryType.value = "income";
@@ -586,12 +502,6 @@ const onSaveEntry = async () => {
   const numericAmount = Number.parseFloat(trimmedAmount);
   if (Number.isNaN(numericAmount)) return;
   const trimmedName = entryName.value.trim() || "Untitled";
-  errorMessage.value = "";
-  if (!userId.value) {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-  }
-  if (!userId.value) return;
   const payload = {
     type: entryType.value,
     amount: numericAmount,
@@ -605,20 +515,10 @@ const onSaveEntry = async () => {
         : null,
     categoryId: selectedCategoryId.value || uncategorizedId.value,
   };
-  try {
-    if (editingId.value) {
-      const updated = await updateEntry(editingId.value, payload);
-      entries.value = entries.value.map((item) =>
-        item.$id === updated.$id ? updated : item
-      );
-    } else {
-      const created = await createEntry(payload, userId.value);
-      entries.value.unshift(created);
-    }
+  const saved = await saveEntry({ payload, editingId: editingId.value });
+  if (saved) {
     closeModal();
     resetForm();
-  } catch (error) {
-    errorMessage.value = error?.message || "Could not save entry.";
   }
 };
 
@@ -646,101 +546,20 @@ const closeDeleteModal = () => {
 
 const confirmDelete = async () => {
   if (!deleteTargetId.value) return;
-  try {
-    await deleteEntry(deleteTargetId.value);
-    entries.value = entries.value.filter(
-      (item) => item.$id !== deleteTargetId.value
-    );
+  const deleted = await deleteEntryById(deleteTargetId.value);
+  if (deleted) {
     closeDeleteModal();
-  } catch (error) {
-    errorMessage.value = error?.message || "Could not delete entry.";
   }
 };
 
-const visibleMonths = computed(() => {
-  if (showAllMonths.value) return months;
-  const currentIndex = new Date().getMonth();
-  const upcoming = [];
-  for (let i = 0; i < 4; i += 1) {
-    const index = (currentIndex + i) % 12;
-    upcoming.push(months[index]);
-  }
-  return upcoming;
-});
-
-const matchesSelectedYear = (entry) =>
-  (entry.year ?? currentYear) === selectedYear.value;
-
-const migrateMissingYears = async () => {
-  if (hasMigratedYears.value || isMigratingYears.value) return;
-  isMigratingYears.value = true;
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) return;
-    const categoryResult = await listCategories(userId.value);
-    categories.value = categoryResult.documents;
-    const uncategorized = categories.value.find(
-      (category) => category.name.toLowerCase() === "uncategorized"
-    );
-    const income = categories.value.find(
-      (category) => category.name.toLowerCase() === "income"
-    );
-    const uncategorizedIdLocal = uncategorized?.$id ?? "";
-    const incomeIdLocal = income?.$id ?? "";
-    const updates = [];
-    for (const month of months) {
-      const result = await listEntries(month, userId.value);
-      for (const entry of result.documents) {
-        if (entry.year) continue;
-        const createdAt = entry.$createdAt || entry.createdAt;
-        const year = createdAt ? new Date(createdAt).getFullYear() : null;
-        if (!Number.isFinite(year)) continue;
-        const fallbackCategoryId =
-          entry.type === "income" ? incomeIdLocal || uncategorizedIdLocal : uncategorizedIdLocal || incomeIdLocal;
-        const categoryId = entry.categoryId || fallbackCategoryId;
-        if (!categoryId) continue;
-        updates.push(updateEntry(entry.$id, { year, categoryId }));
-      }
-    }
-    if (updates.length) {
-      await Promise.all(updates);
-    }
-    hasMigratedYears.value = true;
-  } catch (error) {
-    errorMessage.value =
-      error?.message || "Could not migrate entries to include year.";
-  } finally {
-    isMigratingYears.value = false;
+const loadEntriesAndDefaults = async () => {
+  await loadEntries();
+  if (!selectedCategoryId.value) {
+    selectedCategoryId.value = incomeCategoryId.value || uncategorizedId.value;
   }
 };
 
-const loadEntries = async () => {
-  errorMessage.value = "";
-  isLoading.value = true;
-  try {
-    await migrateMissingYears();
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) {
-      entries.value = [];
-      return;
-    }
-    const categoryResult = await listCategories(userId.value);
-    categories.value = categoryResult.documents;
-    if (!selectedCategoryId.value) {
-      selectedCategoryId.value = incomeCategoryId.value || uncategorizedId.value;
-    }
-    const result = await listEntries(selectedMonth.value, userId.value);
-    entries.value = result.documents.filter(matchesSelectedYear);
-  } catch (error) {
-    errorMessage.value = error?.message || "Could not load entries.";
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-watch([selectedMonth, selectedYear], loadEntries, { immediate: true });
+watch([selectedMonth, selectedYear], loadEntriesAndDefaults, { immediate: true });
 loadPreferences();
 
 watch([isModalOpen, entryType], async ([open]) => {
@@ -775,59 +594,6 @@ watch(entryType, (value) => {
   }
 });
 
-const filteredEntries = computed(() => {
-  if (!selectedCategoryFilters.value.length) return entries.value;
-  return entries.value.filter((entry) =>
-    selectedCategoryFilters.value.includes(entry.categoryId)
-  );
-});
-
-const incomeTotal = computed(() =>
-  entries.value
-    .filter((entry) => entry.type === "income")
-    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
-);
-
-const expenseTotal = computed(() =>
-  entries.value
-    .filter((entry) => entry.type === "expense")
-    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
-);
-
-const balanceTotal = computed(
-  () => (incomeTotal.value ?? 0) - (expenseTotal.value ?? 0)
-);
-
-const filteredTotal = computed(() =>
-  filteredEntries.value.reduce((sum, entry) => {
-    const amount = Number(entry.amount) || 0;
-    return entry.type === "expense" ? sum - amount : sum + amount;
-  }, 0)
-);
-
-const categoryNameById = computed(() =>
-  Object.fromEntries(
-    categories.value.map((category) => [category.$id, category.name])
-  )
-);
-
-const categoryColorById = computed(() =>
-  Object.fromEntries(
-    categories.value.map((category) => [category.$id, category.color])
-  )
-);
-
-const entryCardStyle = (entry) => {
-  if (entry.type === "income") {
-    return { background: "#2c6e631f" };
-  }
-  const name = categoryNameById.value[entry.categoryId];
-  if (!entry.categoryId || name?.toLowerCase() === "uncategorized") {
-    return null;
-  }
-  return { background: `${categoryColorById.value[entry.categoryId]}1f` };
-};
-
 const openCopyMonth = () => {
   const currentIndex = months.indexOf(selectedMonth.value);
   const fallbackIndex = currentIndex > 0 ? currentIndex - 1 : months.length - 1;
@@ -842,34 +608,9 @@ const closeCopyModal = () => {
 
 const onCopyMonth = async () => {
   if (!copySourceMonth.value) return;
-  errorMessage.value = "";
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) return;
-    const source = await listEntries(copySourceMonth.value, userId.value);
-    const tasks = source.documents
-      .filter(matchesSelectedYear)
-      .map((entry) =>
-        createEntry(
-          {
-            name: entry.name,
-            amount: entry.amount,
-            type: entry.type,
-            month: selectedMonth.value,
-            year: selectedYear.value,
-            userId: userId.value,
-            dueDay: entry.dueDay ?? null,
-            categoryId: entry.categoryId ?? uncategorizedId.value,
-          },
-          userId.value
-        )
-      );
-    await Promise.all(tasks);
-    await loadEntries();
+  const copied = await copyMonth(copySourceMonth.value);
+  if (copied) {
     closeCopyModal();
-  } catch (error) {
-    errorMessage.value = error?.message || "Could not copy month.";
   }
 };
 
@@ -881,217 +622,194 @@ const closeClearModal = () => {
   isClearOpen.value = false;
 };
 
-const openTemplateModal = async () => {
-  await loadTemplates();
-  isTemplateOpen.value = true;
-};
-
-const closeTemplateModal = () => {
-  isTemplateOpen.value = false;
-  templateName.value = "";
-  templateError.value = "";
-  templateSuccess.value = "";
-};
-
-const loadTemplates = async () => {
-  templateError.value = "";
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) {
-      templates.value = [];
-      return;
-    }
-    const result = await listTemplates(userId.value);
-    templates.value = result.documents;
-  } catch (error) {
-    templateError.value = error?.message || "Could not load templates.";
-  }
-};
-
-const normalizeTemplateEntries = () =>
-  entries.value.map((entry) => ({
-    name: entry.name,
-    amount: entry.amount,
-    type: entry.type,
-    dueDay: entry.dueDay ?? null,
-    categoryId: entry.categoryId ?? uncategorizedId.value,
-  }));
-
-const onSaveTemplate = async () => {
-  templateError.value = "";
-  templateSuccess.value = "";
-  const trimmedName = templateName.value.trim();
-  if (!trimmedName) {
-    templateError.value = "Template name is required.";
-    return;
-  }
-  if (!entries.value.length) {
-    templateError.value = "Current month has no entries.";
-    return;
-  }
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) return;
-    const payload = {
-      name: trimmedName,
-      userId: userId.value,
-      data: JSON.stringify(normalizeTemplateEntries()),
-    };
-    await createTemplate(payload, userId.value);
-    templateSuccess.value = "Template saved.";
-    templateName.value = "";
-    await loadTemplates();
-  } catch (error) {
-    templateError.value = error?.message || "Could not save template.";
-  }
-};
-
-const parseTemplateData = (template) => {
-  try {
-    return JSON.parse(template.data || "[]");
-  } catch {
-    return [];
-  }
-};
-
-const templateCount = (template) => parseTemplateData(template).length;
-
-const onApplyTemplate = async (template) => {
-  templateError.value = "";
-  templateSuccess.value = "";
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) return;
-    const items = parseTemplateData(template);
-    const tasks = items.map((entry) =>
-      createEntry(
-        {
-          name: entry.name || "Untitled",
-          amount: Number(entry.amount) || 0,
-          type: entry.type || "expense",
-          month: selectedMonth.value,
-          year: selectedYear.value,
-          userId: userId.value,
-          dueDay: entry.dueDay ?? null,
-          categoryId: entry.categoryId ?? uncategorizedId.value,
-        },
-        userId.value
-      )
-    );
-    await Promise.all(tasks);
-    templateSuccess.value = "Template applied.";
-    await loadEntries();
-  } catch (error) {
-    templateError.value = error?.message || "Could not apply template.";
-  }
-};
-
-const onDeleteTemplate = async (template) => {
-  templateError.value = "";
-  templateSuccess.value = "";
-  try {
-    await deleteTemplate(template.$id);
-    templates.value = templates.value.filter((item) => item.$id !== template.$id);
-    templateSuccess.value = "Template deleted.";
-  } catch (error) {
-    templateError.value = error?.message || "Could not delete template.";
-  }
-};
-
-const openTemplateConfirm = (action, template) => {
-  templateAction.value = action;
-  selectedTemplate.value = template;
-  isTemplateConfirmOpen.value = true;
-};
-
-const closeTemplateConfirm = () => {
-  isTemplateConfirmOpen.value = false;
-  templateAction.value = "";
-  selectedTemplate.value = null;
-};
-
-const templateConfirmTitle = computed(() =>
-  templateAction.value === "delete" ? "Delete template" : "Apply template"
-);
-
-const templateConfirmText = computed(() => {
-  if (!selectedTemplate.value) return "";
-  const name = selectedTemplate.value.name || "this template";
-  return templateAction.value === "delete"
-    ? `Are you sure you want to delete "${name}"?`
-    : `Apply "${name}" to ${selectedMonth.value} ${selectedYear.value}?`;
-});
-
-const templateConfirmActionLabel = computed(() =>
-  templateAction.value === "delete" ? "Delete" : "Apply"
-);
-
-const confirmTemplateAction = async () => {
-  if (!selectedTemplate.value) return;
-  isTemplateActioning.value = true;
-  try {
-    if (templateAction.value === "delete") {
-      await onDeleteTemplate(selectedTemplate.value);
-    } else {
-      await onApplyTemplate(selectedTemplate.value);
-    }
-    closeTemplateConfirm();
-  } finally {
-    isTemplateActioning.value = false;
-  }
-};
-
 const confirmClearMonth = async () => {
-  errorMessage.value = "";
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) return;
-    const result = await listEntries(selectedMonth.value, userId.value);
-    const tasks = result.documents
-      .filter(matchesSelectedYear)
-      .map((entry) => deleteEntry(entry.$id));
-    await Promise.all(tasks);
-    await loadEntries();
+  const cleared = await clearMonth();
+  if (cleared) {
     closeClearModal();
-  } catch (error) {
-    errorMessage.value = error?.message || "Could not clear month.";
   }
-};
-
-const sortedEntries = computed(() => {
-  const priority = { income: 0, expense: 1 };
-  const nameById = Object.fromEntries(
-    categories.value.map((category) => [category.$id, category.name])
-  );
-  return [...filteredEntries.value].sort((a, b) => {
-    const typeDiff = (priority[a.type] ?? 2) - (priority[b.type] ?? 2);
-    if (typeDiff !== 0) return typeDiff;
-    const aCategory = nameById[a.categoryId] || "Uncategorized";
-    const bCategory = nameById[b.categoryId] || "Uncategorized";
-    const categoryDiff = aCategory.localeCompare(bCategory);
-    if (categoryDiff !== 0) return categoryDiff;
-    return a.name.localeCompare(b.name);
-  });
-});
-
-const toggleCategoryFilter = (categoryId) => {
-  const next = new Set(selectedCategoryFilters.value);
-  if (next.has(categoryId)) {
-    next.delete(categoryId);
-  } else {
-    next.add(categoryId);
-  }
-  selectedCategoryFilters.value = [...next];
-};
-
-const clearCategoryFilters = () => {
-  selectedCategoryFilters.value = [];
 };
 
 const isCategorySelected = (categoryId) =>
   selectedCategoryFilters.value.includes(categoryId);
 </script>
+
+<style scoped>
+:deep(.entry-modal) {
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+:deep(.entry-modal .modal__body) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+:deep(.modal__body.entry-modal__body) {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+:deep(.modal__body .month-tabs__buttons) {
+  margin-bottom: 12px;
+}
+
+.entry-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.entry-scroll__body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 6px;
+  padding-bottom: 24px;
+}
+
+.entry-scroll__hint {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #7a6f63;
+  pointer-events: none;
+  padding-bottom: 2px;
+}
+
+.entry-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+.entry-modal__submit {
+  padding: 12px 50px;
+  font-size: var(--font-md);
+}
+
+.modal__form {
+  display: grid;
+  gap: 14px;
+}
+
+.modal__toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.toggle-button {
+  border: 1px solid rgba(24, 19, 10, 0.18);
+  background: #ffffff;
+  color: #4f473e;
+  padding: 10px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-button--active {
+  background: #2c6e63;
+  border-color: #2c6e63;
+  color: #fdfaf4;
+}
+
+.template-save-button {
+  margin: 8px 0;
+}
+
+.template-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.template-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(24, 19, 10, 0.1);
+  background: #ffffff;
+}
+
+.template-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.template-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f1d1a;
+}
+
+.template-count {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: #7a6f63;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.action-row--spread {
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+
+.action-row--ruled {
+  padding: 12px 0;
+  border-top: 1px solid rgba(24, 19, 10, 0.1);
+  border-bottom: 1px solid rgba(24, 19, 10, 0.1);
+}
+
+.summary-inline {
+  font-size: var(--font-sm);
+  color: #7a6f63;
+  text-align: right;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.category-legend-total {
+  margin: 6px 0 0;
+  font-size: var(--font-sm);
+  color: #5f564c;
+}
+
+.month-tabs__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .action-row--spread {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .summary-inline {
+    text-align: left;
+    white-space: normal;
+  }
+}
+</style>

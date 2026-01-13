@@ -40,7 +40,6 @@
               <BaseButton
                 variant="primary"
                 type="button"
-                class="button--small"
                 :disabled="isCreatingUser"
                 @click="onCreateUser"
               >
@@ -86,7 +85,6 @@
           <BaseButton
             variant="primary"
             type="button"
-            class="button--small"
             :disabled="isSaving"
             @click="onSavePreferences"
           >
@@ -131,7 +129,6 @@
           <BaseButton
             variant="primary"
             type="button"
-            class="button--small"
             :disabled="isUpdatingPassword"
             @click="onUpdatePassword"
           >
@@ -178,7 +175,6 @@
           <BaseButton
             variant="primary"
             type="button"
-            class="button--small"
             :disabled="!canCreateCategory"
             @click="onCreateCategory"
           >
@@ -281,32 +277,35 @@ import BaseButton from "../components/BaseButton.vue";
 import DashboardLayout from "../components/DashboardLayout.vue";
 import { computed, onMounted, ref } from "vue";
 import {
-  createCategory,
   createAccount,
-  deleteCategory,
-  getCurrentUser,
-  listCategories,
   listTeamMemberships,
   updatePassword,
-  updateCategory,
   logoutCurrent,
 } from "../services/appwrite.js";
-import {
-  currency,
-  loadPreferences,
-  savePreferences,
-  savingsRate,
-  showDecimals,
-} from "../services/currency.js";
+import { useCategoryManager } from "../composables/useCategoryManager.js";
+import { usePreferences } from "../composables/usePreferences.js";
+import { useUser } from "../composables/useUser.js";
 
 const router = useRouter();
+const { userId, loadUser } = useUser();
+const { currency, loadPreferences, savePreferences, savingsRate, showDecimals } =
+  usePreferences();
 const isSaving = ref(false);
 const errorMessage = ref("");
 const categoryName = ref("");
 const categoryColor = ref("#2c6e63");
-const categories = ref([]);
-const categoryError = ref("");
 const colorInput = ref(null);
+const {
+  categories,
+  categoryError,
+  loadCategories,
+  createCategoryForUser,
+  updateCategoryForUser,
+  deleteCategoryForUser,
+  addDefaultCategories: addDefaultCategoriesForUser,
+  applyHexInput,
+  syncHexWithColor,
+} = useCategoryManager();
 const updatingCategoryId = ref(null);
 const activeCategoryId = ref(null);
 const adminError = ref("");
@@ -337,23 +336,6 @@ const colorPresets = [
   "#6f7aa6",
 ];
 
-const normalizeHex = (value) => {
-  const raw = value.trim().replace(/^#/, "");
-  if (!/^[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(raw)) return null;
-  const expanded =
-    raw.length === 3
-      ? raw
-          .split("")
-          .map((ch) => `${ch}${ch}`)
-          .join("")
-      : raw;
-  return `#${expanded.toUpperCase()}`;
-};
-
-const syncHexInput = (category) => {
-  category.hexInput = category.color;
-};
-
 const onLogout = async () => {
   await logoutCurrent();
   await router.push("/login");
@@ -371,24 +353,6 @@ const onSavePreferences = async () => {
   }
 };
 
-const loadCategories = async () => {
-  categoryError.value = "";
-  try {
-    const user = await getCurrentUser();
-    if (!user?.$id) {
-      categories.value = [];
-      return;
-    }
-    const result = await listCategories(user.$id);
-    categories.value = result.documents.map((category) => ({
-      ...category,
-      hexInput: category.color,
-    }));
-  } catch (error) {
-    categoryError.value = error?.message || "Could not load categories.";
-  }
-};
-
 const canCreateCategory = computed(
   () => categoryName.value.trim().length > 0
 );
@@ -397,17 +361,13 @@ const onCreateCategory = async () => {
   if (!canCreateCategory.value) return;
   categoryError.value = "";
   try {
-    const user = await getCurrentUser();
-    if (!user?.$id) return;
-    const created = await createCategory(
-      {
-        name: categoryName.value.trim(),
-        color: categoryColor.value,
-        userId: user.$id,
-      },
-      user.$id
-    );
-    syncHexInput(created);
+    await loadUser();
+    if (!userId.value) return;
+    const created = await createCategoryForUser(userId.value, {
+      name: categoryName.value.trim(),
+      color: categoryColor.value,
+    });
+    if (!created) return;
     categories.value = [...categories.value, created].sort((a, b) =>
       a.name.localeCompare(b.name)
     );
@@ -420,7 +380,7 @@ const onCreateCategory = async () => {
 const onDeleteCategory = async (categoryId) => {
   categoryError.value = "";
   try {
-    await deleteCategory(categoryId);
+    await deleteCategoryForUser(categoryId);
     categories.value = categories.value.filter((item) => item.$id !== categoryId);
     if (activeCategoryId.value === categoryId) {
       activeCategoryId.value = null;
@@ -434,15 +394,9 @@ const onUpdateCategory = async (category) => {
   categoryError.value = "";
   updatingCategoryId.value = category.$id;
   try {
-    const normalized = normalizeHex(category.hexInput || category.color);
-    if (!normalized) {
-      category.hexInput = category.color;
-      categoryError.value = "Enter a valid hex color (e.g. #2C6E63).";
-      return;
-    }
-    category.color = normalized;
-    category.hexInput = normalized;
-    await updateCategory(category.$id, {
+    const normalized = applyHexInput(category);
+    if (!normalized) return;
+    await updateCategoryForUser(category.$id, {
       name: category.name.trim() || "Uncategorized",
       color: category.color,
       userId: category.userId,
@@ -455,19 +409,11 @@ const onUpdateCategory = async (category) => {
 };
 
 const onHexBlur = (category) => {
-  categoryError.value = "";
-  const normalized = normalizeHex(category.hexInput || "");
-  if (!normalized) {
-    category.hexInput = category.color;
-    categoryError.value = "Enter a valid hex color (e.g. #2C6E63).";
-    return;
-  }
-  category.color = normalized;
-  category.hexInput = normalized;
+  applyHexInput(category);
 };
 
 const onCategoryColorPicker = (category) => {
-  category.hexInput = normalizeHex(category.color) || category.color;
+  syncHexWithColor(category);
 };
 
 const onColorChange = () => {
@@ -479,26 +425,9 @@ const onColorChange = () => {
 const addDefaultCategories = async () => {
   categoryError.value = "";
   try {
-    const user = await getCurrentUser();
-    if (!user?.$id) return;
-    const existing = new Set(
-      categories.value.map((category) => category.name.toLowerCase())
-    );
-    const created = [];
-    for (const category of defaultCategories) {
-      if (existing.has(category.name.toLowerCase())) continue;
-      const result = await createCategory(
-        { ...category, userId: user.$id },
-        user.$id
-      );
-      syncHexInput(result);
-      created.push(result);
-    }
-    if (created.length > 0) {
-      categories.value = [...categories.value, ...created].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      );
-    }
+    await loadUser();
+    if (!userId.value) return;
+    await addDefaultCategoriesForUser(userId.value, defaultCategories);
   } catch (error) {
     categoryError.value = error?.message || "Could not add defaults.";
   }
@@ -507,14 +436,14 @@ const addDefaultCategories = async () => {
 const loadAdminState = async () => {
   adminError.value = "";
   try {
-    const user = await getCurrentUser();
-    if (!user?.$id) {
+    await loadUser();
+    if (!userId.value) {
       isAdmin.value = false;
       return;
     }
     const memberships = await listTeamMemberships();
     const membership = memberships.memberships.find(
-      (item) => item.userId === user.$id
+      (item) => item.userId === userId.value
     );
     isAdmin.value = membership?.roles?.includes("admin") || false;
   } catch (error) {
@@ -580,3 +509,286 @@ onMounted(async () => {
   await loadAdminState();
 });
 </script>
+
+<style scoped>
+.settings-actions {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-card {
+  padding: 16px;
+  border-radius: var(--radius-card);
+  background: #fbfaf7;
+  border: 1px solid rgba(24, 19, 10, 0.08);
+  display: grid;
+  gap: 10px;
+}
+
+.settings-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px;
+  padding-bottom: 6px;
+  font-size: var(--font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #7a6f63;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-summary::after {
+  content: "+";
+  font-size: 14px;
+}
+
+.settings-section[open] .settings-summary::after {
+  content: "–";
+}
+
+.settings-section__body {
+  padding: 0 16px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.admin-subsection {
+  border: 1px solid rgba(24, 19, 10, 0.08);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.admin-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #7a6f63;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.admin-summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-summary::after {
+  content: "+";
+  font-size: 14px;
+}
+
+.admin-subsection[open] .admin-summary::after {
+  content: "–";
+}
+
+.admin-section__body {
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.category-list {
+  display: grid;
+  gap: 10px;
+}
+
+.category-title {
+  margin: 12px 0 8px;
+  font-size: var(--font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #7a6f63;
+  font-weight: 600;
+}
+
+.category-row {
+  display: grid;
+  grid-template-columns: 16px minmax(140px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.category-content {
+  display: grid;
+  gap: 8px;
+}
+
+.category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.category-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.category-row:not(:last-child) {
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(24, 19, 10, 0.08);
+}
+
+.category-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(24, 19, 10, 0.12);
+}
+
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-row input[type="color"] {
+  width: 40px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(24, 19, 10, 0.15);
+  background: transparent;
+}
+
+.color-value {
+  font-size: var(--font-sm);
+  color: #7a6f63;
+}
+
+.color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-preset {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(24, 19, 10, 0.12);
+  cursor: pointer;
+}
+
+.color-preset--active {
+  box-shadow: 0 0 0 2px rgba(44, 110, 99, 0.25);
+}
+
+.category-name {
+  font-size: 14px;
+  color: #1f1d1a;
+}
+
+.category-input {
+  border: 1px solid rgba(24, 19, 10, 0.12);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: var(--font-sm);
+  font-family: inherit;
+  background: #ffffff;
+}
+
+.category-input--hex {
+  width: 110px;
+  text-transform: uppercase;
+}
+
+.color-picker {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  min-width: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(24, 19, 10, 0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.color-picker input[type="color"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.color-picker__swatch {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.category-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.category-actions__left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.category-actions__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .color-picker {
+    width: 32px;
+    height: 32px;
+  }
+
+  .settings-card {
+    width: 100%;
+  }
+
+  .category-row {
+    grid-template-columns: 16px 1fr;
+    grid-auto-rows: auto;
+  }
+
+  .category-input {
+    width: 100%;
+  }
+
+  .category-actions {
+    grid-column: 2 / -1;
+    flex-wrap: nowrap;
+  }
+
+  .color-row {
+    flex-wrap: wrap;
+  }
+
+  .color-presets {
+    width: 100%;
+  }
+}
+</style>

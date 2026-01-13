@@ -6,38 +6,16 @@
   >
     <template #actions>
       <p class="today-text">Today · {{ todayLabel }}</p>
-      <div class="month-tabs">
-        <div class="month-tabs__row">
-          <span class="month-tabs__label">Year</span>
-          <select v-model.number="selectedYear" class="month-tabs__select">
-            <option v-for="year in years" :key="year" :value="year">
-              {{ year }}
-            </option>
-          </select>
-        </div>
-        <div class="month-tabs__row">
-          <span class="month-tabs__label">Month</span>
-          <div class="month-tabs__buttons">
-            <button
-              v-for="month in visibleMonths"
-              :key="month"
-              type="button"
-              class="month-tab"
-              :class="{ 'month-tab--active': selectedMonth === month }"
-              @click="selectedMonth = month"
-            >
-              {{ month }}
-            </button>
-            <button
-              type="button"
-              class="month-tab month-tab--more"
-              @click="showAllMonths = !showAllMonths"
-            >
-              {{ showAllMonths ? "Less" : "More" }}
-            </button>
-          </div>
-        </div>
-      </div>
+      <MonthTabs
+        :years="years"
+        :selected-year="selectedYear"
+        :visible-months="visibleMonths"
+        :selected-month="selectedMonth"
+        :show-all="showAllMonths"
+        @update:selected-year="selectedYear = $event"
+        @update:selected-month="selectedMonth = $event"
+        @toggle-show-all="showAllMonths = !showAllMonths"
+      />
     </template>
 
     <div class="stats stats--wide">
@@ -174,76 +152,42 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import DashboardLayout from "../components/DashboardLayout.vue";
-import {
-  getCurrentUser,
-  listCategories,
-  listEntries,
-} from "../services/appwrite.js";
-import {
-  formatCurrency,
-  loadPreferences,
-  savingsRate,
-} from "../services/currency.js";
+import MonthTabs from "../components/MonthTabs.vue";
+import { useDashboardData } from "../composables/useDashboardData.js";
+import { useCategories } from "../composables/useCategories.js";
+import { useMonths } from "../composables/useMonths.js";
+import { usePreferences } from "../composables/usePreferences.js";
+import { useUser } from "../composables/useUser.js";
 
-const months = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
+const { months, currentYear, selectedMonth, selectedYear, showAllMonths, years, visibleMonths } =
+  useMonths();
+const { userId, loadUser } = useUser();
+const { loadCategories, categoryNameById, categoryColorById } = useCategories();
+const { formatCurrency, loadPreferences, savingsRate } = usePreferences();
 
-const currentYear = new Date().getFullYear();
-const selectedMonth = ref(months[new Date().getMonth()]);
-const selectedYear = ref(currentYear);
-const showAllMonths = ref(false);
 const chartMode = ref("income");
-const entries = ref([]);
-const yearEntries = ref([]);
-const userId = ref(null);
-const categories = ref([]);
-const today = new Date();
-const years = computed(() => {
-  const start = currentYear - 3;
-  const end = currentYear + 3;
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-});
-
-const visibleMonths = computed(() => {
-  if (showAllMonths.value) return months;
-  const currentIndex = new Date().getMonth();
-  const upcoming = [];
-  for (let i = 0; i < 4; i += 1) {
-    const index = (currentIndex + i) % 12;
-    upcoming.push(months[index]);
-  }
-  return upcoming;
-});
-
-const incomeTotal = computed(() => {
-  if (entries.value.length === 0) return null;
-  return entries.value
-    .filter((entry) => entry.type === "income")
-    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-});
-
-const expenseTotal = computed(() => {
-  if (entries.value.length === 0) return null;
-  return entries.value
-    .filter((entry) => entry.type === "expense")
-    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-});
-
-const balanceTotal = computed(() => {
-  if (entries.value.length === 0) return null;
-  return (incomeTotal.value ?? 0) - (expenseTotal.value ?? 0);
+const {
+  loadEntries,
+  loadYearEntries,
+  incomeTotal,
+  expenseTotal,
+  balanceTotal,
+  remainingToPay,
+  expenseByCategory,
+  maxCategoryAmount,
+  yearlyTotals,
+  maxYearAmount,
+} = useDashboardData({
+  months,
+  currentYear,
+  selectedMonth,
+  selectedYear,
+  chartMode,
+  userId,
+  loadUser,
+  loadCategories,
+  categoryNameById,
+  categoryColorById,
 });
 
 const recommendedSaving = computed(() => {
@@ -257,123 +201,9 @@ const balanceAfterSaving = computed(() => {
   return (balanceTotal.value ?? 0) - (recommendedSaving.value ?? 0);
 });
 
-const remainingToPay = computed(() => {
-  if (entries.value.length === 0) return null;
-  const currentMonthName = months[today.getMonth()];
-  const todayDay = today.getDate();
-  const total = entries.value
-    .filter((entry) => entry.type === "expense")
-    .filter((entry) => Number.isFinite(entry.dueDay))
-    .filter((entry) =>
-      selectedMonth.value === currentMonthName ? entry.dueDay > todayDay : true
-    )
-    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-  return total;
-});
-
-const normalizeYear = (value) => {
-  if (Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const matchesSelectedYear = (entry) => {
-  const entryYear = normalizeYear(entry.year);
-  if (Number.isFinite(entryYear)) return entryYear === selectedYear.value;
-  return selectedYear.value === currentYear;
-};
-
-const loadEntries = async () => {
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) {
-      entries.value = [];
-      return;
-    }
-    const categoryResult = await listCategories(userId.value);
-    categories.value = categoryResult.documents;
-    const result = await listEntries(selectedMonth.value, userId.value);
-    entries.value = result.documents.filter(matchesSelectedYear);
-  } catch {
-    entries.value = [];
-  }
-};
-
-const loadYearEntries = async () => {
-  try {
-    const user = await getCurrentUser();
-    userId.value = user?.$id ?? null;
-    if (!userId.value) {
-      yearEntries.value = [];
-      return;
-    }
-    const results = await Promise.all(
-      months.map((month) => listEntries(month, userId.value))
-    );
-    yearEntries.value = results
-      .flatMap((result) => result.documents)
-      .filter(matchesSelectedYear);
-  } catch {
-    yearEntries.value = [];
-  }
-};
-
 watch([selectedMonth, selectedYear], loadEntries, { immediate: true });
 watch(selectedYear, loadYearEntries, { immediate: true });
 loadPreferences();
-
-const categoryNameById = computed(() =>
-  Object.fromEntries(categories.value.map((category) => [category.$id, category.name]))
-);
-
-const categoryColorById = computed(() =>
-  Object.fromEntries(
-    categories.value.map((category) => [category.$id, category.color])
-  )
-);
-
-const expenseByCategory = computed(() => {
-  const totals = {};
-  entries.value.forEach((entry) => {
-    if (entry.type !== "expense") return;
-    const key = entry.categoryId || "uncategorized";
-    const amount = Number(entry.amount) || 0;
-    totals[key] = (totals[key] || 0) + amount;
-  });
-  const rows = Object.entries(totals).map(([id, amount]) => ({
-    id,
-    name: id === "uncategorized" ? "Uncategorized" : categoryNameById.value[id],
-    color: categoryColorById.value[id] || "#7a6f63",
-    amount,
-  }));
-  rows.sort((a, b) => b.amount - a.amount);
-  return rows;
-});
-
-const maxCategoryAmount = computed(() =>
-  Math.max(0, ...expenseByCategory.value.map((row) => row.amount))
-);
-
-const yearlyTotals = computed(() => {
-  if (yearEntries.value.length === 0) return [];
-  const totals = months.map((month) => {
-    const amount = yearEntries.value
-      .filter((entry) => entry.month === month)
-      .filter((entry) => entry.type === chartMode.value)
-      .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-    return { month, amount };
-  });
-  const hasValues = totals.some((row) => row.amount > 0);
-  return hasValues ? totals : [];
-});
-
-const maxYearAmount = computed(() =>
-  Math.max(0, ...yearlyTotals.value.map((row) => row.amount))
-);
 
 const todayLabel = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
@@ -381,3 +211,164 @@ const todayLabel = new Intl.DateTimeFormat("en-GB", {
   year: "numeric",
 }).format(new Date());
 </script>
+
+<style scoped>
+.today-text {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: #7a6f63;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.stats {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stats--wide {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.summary {
+  margin-bottom: 20px;
+}
+
+.stat-card--summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chart {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.chart--ruled {
+  padding: 18px 0;
+  border-top: 1px solid rgba(24, 19, 10, 0.12);
+  border-bottom: 1px solid rgba(24, 19, 10, 0.12);
+  margin: 18px 0 24px;
+}
+
+.chart__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chart-toggle {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.chart__rows {
+  display: grid;
+  gap: 10px;
+}
+
+.chart__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 2fr) 120px;
+  align-items: center;
+  gap: 12px;
+}
+
+.chart__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4f473e;
+  font-size: var(--font-sm);
+}
+
+.chart__bar {
+  height: 10px;
+  background: rgba(24, 19, 10, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.chart__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  opacity: 0.45;
+}
+
+.chart__value {
+  font-size: var(--font-sm);
+  color: #4f473e;
+  text-align: right;
+}
+
+.stat-card {
+  padding: 16px;
+  border-radius: var(--radius-card);
+  background: #fbfaf7;
+  border: 1px solid rgba(24, 19, 10, 0.08);
+}
+
+.stat-label {
+  margin: 0 0 6px;
+  font-size: var(--font-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #7a6f63;
+}
+
+.stat-value {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.panel__section {
+  padding-top: 12px;
+}
+
+.activity {
+  margin-bottom: 20px;
+}
+
+.activity__title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4f473e;
+}
+
+.activity ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #5f564c;
+}
+
+.activity li + li {
+  margin-top: 6px;
+}
+
+@media (max-width: 768px) {
+  .chart__row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    align-items: start;
+  }
+
+  .chart__bar {
+    width: 100%;
+  }
+
+  .chart__value {
+    text-align: left;
+  }
+
+  .chart-toggle {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+</style>

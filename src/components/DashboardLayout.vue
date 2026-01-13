@@ -26,3 +26,43 @@ defineProps({
   subtitle: { type: String, default: "" },
 });
 </script>
+
+<style scoped>
+.panel {
+  width: min(960px, 100%);
+  background: #ffffff;
+  border-radius: var(--radius-lg);
+  padding: 40px;
+  box-shadow: 0 24px 60px rgba(24, 19, 10, 0.12);
+  border: 1px solid rgba(24, 19, 10, 0.08);
+}
+
+.panel__header {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.panel__actions {
+  display: grid;
+  gap: 18px;
+  justify-items: start;
+}
+
+@media (max-width: 768px) {
+  .panel {
+    padding: 32px 24px;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .panel__header {
+    width: 100%;
+  }
+
+  .panel__actions {
+    width: 100%;
+  }
+}
+</style>
