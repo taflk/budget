@@ -504,8 +504,11 @@ const onUpdatePassword = async () => {
 
 onMounted(async () => {
   await loadPreferences();
-  await loadCategories();
-  await addDefaultCategories();
+  await loadUser();
+  if (userId.value) {
+    await loadCategories(userId.value);
+    await addDefaultCategories();
+  }
   await loadAdminState();
 });
 </script>

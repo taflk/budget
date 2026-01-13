@@ -30,7 +30,14 @@ export const loginWithEmail = (email, password) =>
 export const createAccount = (email, password, name = "") =>
   account.create("unique()", email, password, name);
 
-export const logoutCurrent = () => account.deleteSession("current");
+export const logoutCurrent = async () => {
+  try {
+    await account.deleteSession("current");
+  } finally {
+    currentUser = null;
+    currentUserPromise = null;
+  }
+};
 
 let currentUser = null;
 let currentUserPromise = null;

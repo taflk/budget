@@ -13,7 +13,14 @@ export const useCategories = () => {
     }
     const result = await listCategories(userId);
     const mapper = options.mapCategory || ((category) => category);
-    categories.value = result.documents.map(mapper);
+    const seen = new Map();
+    result.documents.forEach((category) => {
+      const mapped = mapper(category);
+      const key = (mapped?.name || "").trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.set(key, mapped);
+    });
+    categories.value = [...seen.values()];
   };
 
   const categoryNameById = computed(() =>
